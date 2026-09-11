@@ -10,10 +10,10 @@ struct Money: Codable, Equatable, Comparable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
 
-        if let double = try? container.decode(Double.self) {
-            self.init(decimal: Decimal(double))
-        } else if let decimal = try? container.decode(Decimal.self) {
+        if let decimal = try? container.decode(Decimal.self) {
             self.init(decimal: decimal)
+        } else if let double = try? container.decode(Double.self) {
+            self.init(decimal: Decimal(double))
         } else if let string = try? container.decode(String.self),
                   let decimal = Decimal(string: string, locale: Locale(identifier: "en_US_POSIX")) {
             self.init(decimal: decimal)
