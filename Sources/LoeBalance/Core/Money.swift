@@ -15,7 +15,7 @@ struct Money: Codable, Equatable, Comparable, Sendable {
         } else if let double = try? container.decode(Double.self) {
             self.init(decimal: Decimal(double))
         } else if let string = try? container.decode(String.self),
-                  let decimal = Decimal(string: string, locale: Locale(identifier: "en_US_POSIX")) {
+                  let decimal = Self.parseDecimalString(string) {
             self.init(decimal: decimal)
         } else {
             throw DecodingError.dataCorruptedError(
@@ -54,6 +54,19 @@ struct Money: Codable, Equatable, Comparable, Sendable {
 
     var currencyText: String {
         Self.currencyFormatter.string(from: decimal as NSDecimalNumber) ?? "$0.00"
+    }
+
+    private static func parseDecimalString(_ string: String) -> Decimal? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = #"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$"#
+
+        guard !trimmed.isEmpty,
+              let match = trimmed.range(of: pattern, options: .regularExpression),
+              match == trimmed.startIndex..<trimmed.endIndex else {
+            return nil
+        }
+
+        return Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX"))
     }
 
     private static let currencyFormatter: NumberFormatter = {
