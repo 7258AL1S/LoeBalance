@@ -98,18 +98,34 @@ final class SettingsViewModel: ObservableObject {
         if let seconds = preset.seconds {
             refreshUnit = .seconds
             customInterval = String(format: "%.0f", seconds)
+        } else {
+            refreshUnit = .seconds
         }
+    }
+
+    func chooseRefreshPreset(_ preset: RefreshIntervalPreset) async throws {
+        selectRefreshPreset(preset)
+        guard preset != .custom else { return }
+        try await applyRefreshInterval()
     }
 
     func applyRefreshInterval() async throws {
         let raw = customInterval.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = Double(raw), value.isFinite, value >= 0 else {
-            restorePersistedRefreshInterval()
+        guard let value = Double(raw), value.isFinite else {
+            refreshPreset = .custom
+            refreshUnit = .seconds
             errorMessage = "Enter a valid refresh interval."
             throw SettingsError.invalidInterval
         }
 
         let seconds = refreshUnit == .minutes ? value * 60 : value
+        guard seconds >= 1 else {
+            refreshPreset = .custom
+            refreshUnit = .seconds
+            errorMessage = "Enter a refresh interval of at least 1 second."
+            throw SettingsError.invalidInterval
+        }
+
         var candidate = preferences
         candidate.setRefreshInterval(seconds)
         let candidatePreset = Self.preset(for: candidate.refreshInterval)

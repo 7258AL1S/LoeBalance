@@ -18,10 +18,10 @@ struct SettingsView: View {
             Picker("Refresh", selection: Binding(
                 get: { viewModel.refreshPreset },
                 set: {
-                    viewModel.selectRefreshPreset($0)
+                    let preset = $0
                     Task {
                         do {
-                            try await viewModel.applyRefreshInterval()
+                            try await viewModel.chooseRefreshPreset(preset)
                         } catch {
                             // The view model restores the last persisted controls and publishes the error.
                         }
@@ -38,11 +38,13 @@ struct SettingsView: View {
                     TextField("Interval", text: $viewModel.customInterval)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 90)
-                    Picker("Unit", selection: $viewModel.refreshUnit) {
-                        Text("Seconds").tag(RefreshIntervalUnit.seconds)
-                        Text("Minutes").tag(RefreshIntervalUnit.minutes)
-                    }
-                    .labelsHidden()
+                        .onSubmit {
+                            Task {
+                                try? await viewModel.applyRefreshInterval()
+                            }
+                        }
+                    Text("seconds")
+                        .foregroundStyle(.secondary)
                     Button("Apply") {
                         Task {
                             do {

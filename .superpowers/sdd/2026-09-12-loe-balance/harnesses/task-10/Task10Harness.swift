@@ -155,21 +155,36 @@ struct Task10Harness {
             logout: { logoutCount += 1 }
         )
 
-        settings.selectRefreshPreset(.fiveMinutes)
+        try await settings.chooseRefreshPreset(.fiveMinutes)
         require(settings.refreshIntervalSeconds == 300, "five-minute preset")
-        settings.refreshPreset = .custom
-        settings.refreshUnit = .minutes
-        settings.customInterval = "2"
-        try await settings.applyRefreshInterval()
-        let minuteInterval = await scheduler.interval
-        require(minuteInterval == 120, "minutes conversion")
-        require(preferences.value?.refreshInterval == 120, "interval persistence")
+        let presetInterval = await scheduler.interval
+        require(presetInterval == 300, "preset applies immediately")
+
+        try await settings.chooseRefreshPreset(.custom)
+        let intervalBeforeCustomApply = await scheduler.interval
+        require(settings.refreshPreset == .custom, "custom editor stays selected")
+        require(intervalBeforeCustomApply == 300, "custom selection does not apply old value")
 
         settings.refreshUnit = .seconds
         settings.customInterval = "1"
         try await settings.applyRefreshInterval()
         let lowerInterval = await scheduler.interval
-        require(lowerInterval == 10, "lower interval clamp")
+        require(lowerInterval == 1, "one-second minimum")
+
+        try await settings.chooseRefreshPreset(.custom)
+        settings.customInterval = "0"
+        do {
+            try await settings.applyRefreshInterval()
+            fatalError("FAIL: zero-second interval did not throw")
+        } catch {
+            require(settings.errorMessage == "Enter a refresh interval of at least 1 second.", "minimum interval error")
+            require(settings.refreshPreset == .custom, "invalid custom interval keeps editor open")
+            require(settings.customInterval == "0", "invalid custom value remains editable")
+            let unchangedInterval = await scheduler.interval
+            require(unchangedInterval == 1, "invalid interval does not reschedule")
+        }
+
+        try await settings.chooseRefreshPreset(.custom)
         settings.customInterval = "99999"
         try await settings.applyRefreshInterval()
         let upperInterval = await scheduler.interval

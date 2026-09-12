@@ -28,7 +28,7 @@ final class RefreshSchedulerTests: XCTestCase {
         await Task.yield()
 
         let durations = await sleeper.requestedDurations
-        XCTAssertEqual(durations, [30, 10])
+        XCTAssertEqual(durations, [30, 1])
         await scheduler.stop()
     }
 

@@ -186,6 +186,6 @@ actor RefreshScheduler: RefreshScheduling {
     }
 
     private static func clamp(_ seconds: TimeInterval) -> TimeInterval {
-        min(3600, max(10, seconds))
+        min(3600, max(1, seconds))
     }
 }

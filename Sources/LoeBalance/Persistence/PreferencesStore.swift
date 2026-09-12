@@ -9,7 +9,7 @@ struct AppPreferences: Codable, Equatable, Sendable {
 
     init(refreshInterval: TimeInterval = 30, shakeStrength: ShakeStrength = .weak,
          showsDesktopCard: Bool = true, launchAtLogin: Bool = false, desktopFrame: CGRect? = nil) {
-        self.refreshInterval = min(3600, max(10, refreshInterval))
+        self.refreshInterval = min(3600, max(1, refreshInterval))
         self.shakeStrength = shakeStrength
         self.showsDesktopCard = showsDesktopCard
         self.launchAtLogin = launchAtLogin
@@ -17,7 +17,7 @@ struct AppPreferences: Codable, Equatable, Sendable {
     }
 
     mutating func setRefreshInterval(_ value: TimeInterval) {
-        refreshInterval = min(3600, max(10, value))
+        refreshInterval = min(3600, max(1, value))
     }
 
     private enum CodingKeys: String, CodingKey {

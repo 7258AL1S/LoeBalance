@@ -4,20 +4,21 @@ import XCTest
 
 final class PersistenceTests: XCTestCase {
     func testRefreshIntervalIsClampedToSupportedRange() {
-        XCTAssertEqual(AppPreferences(refreshInterval: 1).refreshInterval, 10)
+        XCTAssertEqual(AppPreferences(refreshInterval: 0).refreshInterval, 1)
+        XCTAssertEqual(AppPreferences(refreshInterval: 1).refreshInterval, 1)
         XCTAssertEqual(AppPreferences(refreshInterval: 30).refreshInterval, 30)
         XCTAssertEqual(AppPreferences(refreshInterval: 9999).refreshInterval, 3600)
     }
 
     func testRefreshIntervalSetterAndLegacyDecodeAreClamped() throws {
         var preferences = AppPreferences()
-        preferences.setRefreshInterval(1)
-        XCTAssertEqual(preferences.refreshInterval, 10)
+        preferences.setRefreshInterval(0)
+        XCTAssertEqual(preferences.refreshInterval, 1)
         preferences.setRefreshInterval(9999)
         XCTAssertEqual(preferences.refreshInterval, 3600)
 
-        let low = Data(#"{"refreshInterval":1,"shakeStrength":"weak","showsDesktopCard":true,"launchAtLogin":false,"desktopFrame":null}"#.utf8)
-        XCTAssertEqual(try JSONDecoder().decode(AppPreferences.self, from: low).refreshInterval, 10)
+        let low = Data(#"{"refreshInterval":0,"shakeStrength":"weak","showsDesktopCard":true,"launchAtLogin":false,"desktopFrame":null}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(AppPreferences.self, from: low).refreshInterval, 1)
         let high = Data(#"{"refreshInterval":9999,"shakeStrength":"weak","showsDesktopCard":true,"launchAtLogin":false,"desktopFrame":null}"#.utf8)
         XCTAssertEqual(try JSONDecoder().decode(AppPreferences.self, from: high).refreshInterval, 3600)
     }

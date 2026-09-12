@@ -79,7 +79,24 @@ final class SettingsViewModelTests: XCTestCase {
         await first.value
     }
 
-    func testIntervalPresetsAndCustomSecondsMinutesClampAndPersist() async throws {
+    func testChoosingCustomKeepsEditorOpenWithoutApplyingOldValue() async throws {
+        let preferences = SettingsPreferencesStore()
+        let scheduler = SettingsScheduler()
+        let viewModel = SettingsViewModel(
+            preferencesStore: preferences,
+            scheduler: scheduler,
+            launchAtLogin: SettingsLaunchService(),
+            logout: {}
+        )
+
+        try await viewModel.chooseRefreshPreset(.custom)
+
+        XCTAssertEqual(viewModel.refreshPreset, .custom)
+        let interval = await scheduler.lastInterval
+        XCTAssertNil(interval)
+    }
+
+    func testIntervalPresetsAndCustomSecondsClampAndPersist() async throws {
         let preferences = SettingsPreferencesStore()
         let scheduler = SettingsScheduler()
         let launch = SettingsLaunchService()
@@ -90,27 +107,47 @@ final class SettingsViewModelTests: XCTestCase {
             logout: {}
         )
 
-        viewModel.selectRefreshPreset(.fiveMinutes)
+        try await viewModel.chooseRefreshPreset(.fiveMinutes)
         XCTAssertEqual(viewModel.refreshIntervalSeconds, 300)
-        viewModel.refreshUnit = .minutes
-        viewModel.customInterval = "2"
-        try await viewModel.applyRefreshInterval()
-        let minuteInterval = await scheduler.lastInterval
-        XCTAssertEqual(minuteInterval, 120)
-        XCTAssertEqual(try preferences.load()?.refreshInterval, 120)
+        let presetInterval = await scheduler.lastInterval
+        XCTAssertEqual(presetInterval, 300)
 
+        try await viewModel.chooseRefreshPreset(.custom)
         viewModel.refreshUnit = .seconds
         viewModel.customInterval = "1"
         try await viewModel.applyRefreshInterval()
         let lowerInterval = await scheduler.lastInterval
-        XCTAssertEqual(lowerInterval, 10)
-        XCTAssertEqual(try preferences.load()?.refreshInterval, 10)
+        XCTAssertEqual(lowerInterval, 1)
+        XCTAssertEqual(try preferences.load()?.refreshInterval, 1)
 
         viewModel.customInterval = "99999"
         try await viewModel.applyRefreshInterval()
         let upperInterval = await scheduler.lastInterval
         XCTAssertEqual(upperInterval, 3600)
         XCTAssertEqual(try preferences.load()?.refreshInterval, 3600)
+    }
+
+    func testCustomRefreshRejectsValuesBelowOneSecond() async {
+        let scheduler = SettingsScheduler()
+        let viewModel = SettingsViewModel(
+            preferencesStore: SettingsPreferencesStore(),
+            scheduler: scheduler,
+            launchAtLogin: SettingsLaunchService(),
+            logout: {}
+        )
+        viewModel.refreshPreset = .custom
+        viewModel.customInterval = "0"
+
+        do {
+            try await viewModel.applyRefreshInterval()
+            XCTFail("Expected invalid interval")
+        } catch {
+            XCTAssertEqual(viewModel.errorMessage, "Enter a refresh interval of at least 1 second.")
+            XCTAssertEqual(viewModel.refreshPreset, .custom)
+            XCTAssertEqual(viewModel.customInterval, "0")
+            let interval = await scheduler.lastInterval
+            XCTAssertNil(interval)
+        }
     }
 
     func testShakeAndCardVisibilityPersistAndNotifyScheduler() async throws {
