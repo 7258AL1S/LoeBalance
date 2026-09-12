@@ -28,6 +28,37 @@ final class BalanceServiceTests: XCTestCase {
         XCTAssertEqual(result.events, [.debit(Money(decimal: 0.50))])
     }
 
+    func testUsageFailureDoesNotAdvanceStateThenNextSuccessReconcilesOnce() async throws {
+        let initial = BalanceSnapshot(balance: Money(decimal: 10), todaySpend: nil, todayRequests: nil, updatedAt: .fixtureNow)
+        let initialState = PersistedSnapshotState(
+            cachedSnapshot: initial,
+            watermarkTime: .fixtureNow,
+            recentUsageIDs: [7]
+        )
+        let store = TestSnapshotStore(initialState)
+        let api = ServiceTestAPI(
+            user: CurrentUserDTO(id: 42, email: nil, username: nil, balance: Money(decimal: 9)),
+            usageResults: [
+                .failure(.invalidResponse),
+                .success([.fixture(id: 8, cost: 1, secondsAfterBaseline: 1)])
+            ]
+        )
+        let service = try await makeService(api: api, store: store)
+
+        let failed = try await service.refresh()
+
+        XCTAssertEqual(failed.snapshot.balance, Money(decimal: 9))
+        XCTAssertEqual(failed.events, [])
+        XCTAssertEqual(store.value, initialState)
+
+        let recovered = try await service.refresh()
+
+        XCTAssertEqual(recovered.events, [.debit(Money(decimal: 1))])
+        XCTAssertEqual(store.value?.cachedSnapshot?.balance, Money(decimal: 9))
+        XCTAssertEqual(store.value?.watermarkTime, Date.fixtureNow.addingTimeInterval(1))
+        XCTAssertEqual(store.value?.recentUsageIDs, [7, 8])
+    }
+
     func testSecondaryFailuresKeepAuthoritativeBalanceAndNilSecondaryValues() async throws {
         let store = TestSnapshotStore()
         let api = ServiceTestAPI(
@@ -96,6 +127,7 @@ private actor ServiceTestAPI: APIClientProtocol {
     let userError: AppError?
     let dashboard: DashboardStatsDTO
     let usage: [UsageRecord]
+    private var usageResults: [Result<[UsageRecord], AppError>]
     let dashboardError: AppError?
     let usageError: AppError?
     let arrivals: AsyncArrivalCounter?
@@ -107,6 +139,7 @@ private actor ServiceTestAPI: APIClientProtocol {
         userError: AppError? = nil,
         dashboard: DashboardStatsDTO = DashboardStatsDTO(todayRequests: 3, todayActualCost: Money(decimal: 1)),
         usage: [UsageRecord] = [],
+        usageResults: [Result<[UsageRecord], AppError>]? = nil,
         dashboardError: AppError? = nil,
         usageError: AppError? = nil,
         arrivals: AsyncArrivalCounter? = nil,
@@ -116,6 +149,10 @@ private actor ServiceTestAPI: APIClientProtocol {
         self.userError = userError
         self.dashboard = dashboard
         self.usage = usage
+        self.usageResults = usageResults ?? []
+        if self.usageResults.isEmpty, let usageError {
+            self.usageResults = [.failure(usageError)]
+        }
         self.dashboardError = dashboardError
         self.usageError = usageError
         self.arrivals = arrivals
@@ -139,7 +176,9 @@ private actor ServiceTestAPI: APIClientProtocol {
 
     func fetchUsage(accessToken: String, pageSize: Int) async throws -> [UsageRecord] {
         await recordFetch()
-        if let usageError { throw usageError }
+        if !usageResults.isEmpty {
+            return try usageResults.removeFirst().get()
+        }
         return usage
     }
 

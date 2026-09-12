@@ -53,7 +53,15 @@ actor BalanceService {
 
             let user = try await currentUser
             let stats = try? await dashboard
-            let records = (try? await usage) ?? []
+            guard let records = try? await usage else {
+                let snapshot = BalanceSnapshot(
+                    balance: user.balance,
+                    todaySpend: stats?.todayActualCost,
+                    todayRequests: stats?.todayRequests,
+                    updatedAt: now()
+                )
+                return RefreshResult(snapshot: snapshot, events: [], connectionState: .online)
+            }
             let unseen = records
                 .filter { !persisted.recentUsageIDs.contains($0.id) }
                 .sorted { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }

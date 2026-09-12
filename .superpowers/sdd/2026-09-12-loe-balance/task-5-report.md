@@ -98,3 +98,23 @@ The harness uses in-memory credentials and an in-memory snapshot store. No live 
 ## Concerns
 
 The repository's installed Swift toolchain lacks the `XCTest` module, so the XCTest suite could not execute. `swift build`, the persistent harness, and a fresh source rebuild of that harness passed. Test execution should be rerun in an XCTest-capable Swift/Xcode environment.
+
+## Fix Round 1
+
+Finding addressed: usage-fetch failure was previously collapsed to an empty successful result, allowing balance-delta animation and persistence to advance before usage data arrived.
+
+Changes:
+
+- `BalanceService` now preserves the authoritative current-user balance and dashboard values when usage fetch fails, but returns no animation events and skips snapshot persistence, watermark advancement, and recent usage ID advancement.
+- Added `testUsageFailureDoesNotAdvanceStateThenNextSuccessReconcilesOnce`, covering a cached balance of 10, a failed refresh at balance 9, and a following successful usage record costing 1. The failed refresh preserves the prior persisted state; the next refresh emits exactly one `$1.00` debit.
+- Updated the persistent harness source at `.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-5/Task5Harness.swift` with the same two-refresh regression and rebuilt `.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-5/task5-harness`.
+
+Fix Round 1 verification:
+
+- `swift test --filter BalanceServiceTests` before the production fix: exit `1`, blocked by `no such module 'XCTest'` at `Tests/LoeBalanceTests/APIClientTests.swift:2:8`.
+- `swift build`: exit `0`, `Build complete!`.
+- Persistent harness rebuild with `swiftc -swift-version 6 -O`: exit `0`.
+- `.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-5/task5-harness`: exit `0`, `PASS: Task 5 harness baseline, filtering, concurrency, partial failure, reconciliation, tolerance, persistence, and single-flight`.
+- `swift test --filter BalanceServiceTests` after the production fix: exit `1`, still blocked by the missing `XCTest` module before test execution.
+
+Fix Round 1 concern: the XCTest suite remains unexecutable in this toolchain; no live network or real Keychain access was used.
