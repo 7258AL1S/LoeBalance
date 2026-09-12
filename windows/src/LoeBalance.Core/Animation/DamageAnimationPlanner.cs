@@ -54,7 +54,9 @@ public sealed class DamageAnimationPlanner
             var ranges = surface == DamageSurface.Desktop
                 ? new Ranges(-5, 5, -9, 9, -13, 13, reduceMotion ? 43 : 86, reduceMotion ? 50 : 100, -8, 8, reduceMotion ? 0.48 : 0.82)
                 : new Ranges(-3, 3, -5, 5, -7, 7, reduceMotion ? 24 : 47, reduceMotion ? 28 : 55, -4, 4, reduceMotion ? 0.48 : 0.82);
-            var planShake = surface == DamageSurface.Desktop && !reduceMotion && startsBurst && shake != ShakeStrength.Off ? shake : null;
+            ShakeStrength? planShake = surface == DamageSurface.Desktop && !reduceMotion && startsBurst && shake != ShakeStrength.Off
+                ? shake
+                : null;
             result.Add(new DamageMotionPlan(
                 events[index], TimeSpan.FromSeconds(index * 0.23), TimeSpan.FromSeconds(ranges.Duration),
                 _random.Value(ranges.StartMin, ranges.StartMax), _random.Value(ranges.MidMin, ranges.MidMax),
