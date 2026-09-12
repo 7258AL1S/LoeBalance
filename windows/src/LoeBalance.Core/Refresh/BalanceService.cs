@@ -59,9 +59,13 @@ public sealed class BalanceService
                 var events = persisted.CachedSnapshot is null
                     ? Array.Empty<BalanceAnimationEvent>()
                     : _reconciler.Reconcile(persisted.CachedSnapshot.Balance, snapshot.Balance, unseen);
-                var recentIds = usage.Select(record => record.Id).Concat(persisted.RecentUsageIds).Distinct().TakeLast(500).ToList();
                 var watermark = usage.Count == 0 ? persisted.WatermarkTime : usage.Max(record => record.CreatedAt);
-                await _snapshotStore.SaveAsync(new PersistedSnapshotState(snapshot, watermark, recentIds), cancellationToken);
+                var nextState = persisted.RecordUsageIds(usage.Select(record => record.Id)) with
+                {
+                    CachedSnapshot = snapshot,
+                    WatermarkTime = watermark
+                };
+                await _snapshotStore.SaveAsync(nextState, cancellationToken);
                 return new RefreshResult(snapshot, events, new ConnectionState.Online());
             }, cancellationToken);
         }

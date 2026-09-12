@@ -135,7 +135,9 @@ public sealed class ApiClient : IApiClient
     {
         var retryAfter = response.Headers.RetryAfter;
         if (retryAfter is null) return null;
-        if (retryAfter.Delta is TimeSpan delta) return _now().Add(delta);
+        // The macOS client clamps negative deltas to "now" so a past deadline is treated
+        // as an exhausted rate limit instead of a deadline in the past.
+        if (retryAfter.Delta is TimeSpan delta) return _now().Add(delta < TimeSpan.Zero ? TimeSpan.Zero : delta);
         return retryAfter.Date;
     }
 

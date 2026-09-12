@@ -5,6 +5,10 @@ namespace LoeBalance.Core.Auth;
 
 public sealed class AuthManager
 {
+    // Matches the macOS `AuthManager.proactiveRefreshInterval`: refresh before the access
+    // token actually expires so scheduled requests do not race the expiry deadline.
+    private static readonly TimeSpan ProactiveRefreshInterval = TimeSpan.FromSeconds(60);
+
     private readonly IApiClient _api;
     private readonly ICredentialStore _credentials;
     private readonly Func<DateTimeOffset> _now;
@@ -32,8 +36,13 @@ public sealed class AuthManager
     public async Task<bool> RestoreSessionAsync(CancellationToken cancellationToken = default)
     {
         var stored = await _credentials.LoadAsync(cancellationToken);
-        if (stored is null) return false;
+        if (stored is null)
+        {
+            _session = null;
+            return false;
+        }
 
+        _session = new AuthSession(string.Empty, stored.RefreshToken, DateTimeOffset.MinValue, stored.UserId);
         try
         {
             await RefreshSessionAsync(stored.RefreshToken, cancellationToken);
@@ -41,8 +50,7 @@ public sealed class AuthManager
         }
         catch (AppException exception) when (exception.Kind == AppErrorKind.Unauthorized)
         {
-            await _credentials.DeleteAsync(cancellationToken);
-            _session = null;
+            await InvalidateSessionAsync(cancellationToken);
             return false;
         }
     }
@@ -56,6 +64,8 @@ public sealed class AuthManager
         }
         catch (AppException exception) when (exception.Kind == AppErrorKind.Unauthorized)
         {
+            // A 401 always forces a refresh-token exchange, even when the cached access
+            // token still looks valid, and the original operation is replayed exactly once.
             var refreshed = await RefreshSessionAsync(session.RefreshToken, cancellationToken, force: true);
             return await operation(refreshed.AccessToken);
         }
@@ -63,18 +73,17 @@ public sealed class AuthManager
 
     public async Task LogoutAsync(CancellationToken cancellationToken = default)
     {
-        _session = null;
-        await _credentials.DeleteAsync(cancellationToken);
+        await InvalidateSessionAsync(cancellationToken);
     }
 
     private async Task<AuthSession> UsableSessionAsync(CancellationToken cancellationToken)
     {
-        if (_session is null)
+        if (_session is not { UserId: not null } session)
         {
             throw new AppException(AppErrorKind.Unauthorized, "No active session.");
         }
-        if (_session.ExpiresAt - _now() > TimeSpan.FromMinutes(2)) return _session;
-        return await RefreshSessionAsync(_session.RefreshToken, cancellationToken);
+        if (session.ExpiresAt - _now() > ProactiveRefreshInterval) return session;
+        return await RefreshSessionAsync(session.RefreshToken, cancellationToken);
     }
 
     private async Task<AuthSession> RefreshSessionAsync(
@@ -85,19 +94,35 @@ public sealed class AuthManager
         await _refreshLock.WaitAsync(cancellationToken);
         try
         {
-            if (_session is not null && _session.RefreshToken != refreshToken) return _session;
-            if (!force && _session is not null && _session.ExpiresAt - _now() > TimeSpan.FromMinutes(2)) return _session;
+            var expectedUserId = _session?.UserId;
+
+            // Another caller already completed a refresh for a newer token.
+            if (_session is { } current && current.RefreshToken != refreshToken) return current;
+            if (!force && _session is { } fresh && fresh.ExpiresAt - _now() > ProactiveRefreshInterval) return fresh;
+
             var refreshed = await _api.RefreshAsync(refreshToken, cancellationToken);
-            _session = refreshed;
-            if (refreshed.UserId is long userId)
+            if (refreshed.UserId is long refreshedUserId && expectedUserId is long expected && refreshedUserId != expected)
             {
-                await _credentials.SaveAsync(new StoredCredential(refreshed.RefreshToken, userId), cancellationToken);
+                await InvalidateSessionAsync(cancellationToken);
+                throw new AppException(AppErrorKind.Unauthorized, "The refreshed session belongs to a different user.");
             }
-            return refreshed;
+
+            var userId = refreshed.UserId ?? expectedUserId
+                ?? throw new AppException(AppErrorKind.InvalidResponse, "The refresh response contained no user id.");
+            var verified = refreshed with { UserId = userId };
+            await _credentials.SaveAsync(new StoredCredential(verified.RefreshToken, userId), cancellationToken);
+            _session = verified;
+            return verified;
         }
         finally
         {
             _refreshLock.Release();
         }
+    }
+
+    private async Task InvalidateSessionAsync(CancellationToken cancellationToken)
+    {
+        _session = null;
+        await _credentials.DeleteAsync(cancellationToken);
     }
 }
