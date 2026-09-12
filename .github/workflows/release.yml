@@ -17,9 +17,18 @@ permissions:
 jobs:
   macos:
     name: macOS packages
-    runs-on: macos-14
+    # macos-15 ships Xcode 16 (Swift 6); the Package.swift tools version is 6.0, so an
+    # older default toolchain fails with "using Swift tools version 6.0.0 but the installed
+    # version is 5.10.0".
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          newest="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$newest" ]; then sudo xcode-select -s "$newest"; fi
+          swift --version
 
       - name: Resolve version
         id: version
@@ -30,9 +39,6 @@ jobs:
           else
             echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Swift version
-        run: swift --version
 
       - name: Package macOS app (x86_64 and arm64)
         run: bash script/package_release.sh "${{ steps.version.outputs.value }}"
