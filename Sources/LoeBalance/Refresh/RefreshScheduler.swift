@@ -22,39 +22,47 @@ protocol RefreshScheduling: Actor {
 actor RefreshScheduler: RefreshScheduling {
     private let sleeper: any AsyncSleeping
     private let refresh: @Sendable () async throws -> RefreshResult
+    private let now: @Sendable () -> Date
     private var interval: TimeInterval
     private var loopTask: Task<Void, Never>?
-    private var inFlightRefresh: Task<RefreshResult, Error>?
+    private var inFlightRefresh: (epoch: Int, task: Task<RefreshResult, Error>)?
     private var isOnline = true
     private var backoffStep = 0
     private var retryAfter: Date?
     private var started = false
+    private var epoch = 0
 
     init(
         interval: TimeInterval,
         sleeper: any AsyncSleeping = TaskSleeper(),
+        now: @escaping @Sendable () -> Date = { Date() },
         refresh: @escaping @Sendable () async throws -> RefreshResult
     ) {
         self.interval = Self.clamp(interval)
         self.sleeper = sleeper
+        self.now = now
         self.refresh = refresh
     }
 
     func start() async {
         guard !started else { return }
+        epoch += 1
+        let currentEpoch = epoch
         started = true
-        await refreshNow()
-        guard started else { return }
+        isOnline = true
+        await refreshNow(epoch: currentEpoch)
+        guard started, epoch == currentEpoch else { return }
         loopTask = Task { [weak self] in
-            await self?.runLoop()
+            await self?.runLoop(epoch: currentEpoch)
         }
     }
 
     func stop() {
+        epoch += 1
         started = false
         loopTask?.cancel()
         loopTask = nil
-        inFlightRefresh?.cancel()
+        inFlightRefresh?.task.cancel()
         inFlightRefresh = nil
     }
 
@@ -64,78 +72,105 @@ actor RefreshScheduler: RefreshScheduling {
 
     func refreshNow() async {
         guard started || loopTask == nil else { return }
-        await performRefresh()
+        await refreshNow(epoch: epoch)
     }
 
     func networkBecameAvailable() async {
+        guard !isOnline else { return }
         isOnline = true
         guard started else { return }
-        await refreshNow()
+        await refreshNow(epoch: epoch)
     }
 
     func systemDidWake() async {
         guard started else { return }
-        await refreshNow()
+        await refreshNow(epoch: epoch)
     }
 
-    private func runLoop() async {
-        while !Task.isCancelled && started {
+    private func refreshNow(epoch requestedEpoch: Int) async {
+        guard started, requestedEpoch == epoch, isOnline else { return }
+        await performRefresh(epoch: requestedEpoch)
+    }
+
+    private func runLoop(epoch loopEpoch: Int) async {
+        while !Task.isCancelled && started && epoch == loopEpoch {
             do {
                 try await sleeper.sleep(for: nextDelay())
             } catch {
                 return
             }
-            guard !Task.isCancelled, started else { return }
-            if isOnline { await performRefresh() }
+            guard !Task.isCancelled, started, epoch == loopEpoch else { return }
+            if isOnline { await performRefresh(epoch: loopEpoch) }
         }
     }
 
     private func nextDelay() -> TimeInterval {
         guard isOnline else { return interval }
-        if let retryAfter {
-            self.retryAfter = nil
-            return max(0, retryAfter.timeIntervalSinceNow)
-        }
         return backoffStep == 0 ? interval : [10, 20, 40, 80, 160, 300][min(backoffStep - 1, 5)]
     }
 
-    private func performRefresh() async {
-        if let inFlightRefresh {
-            _ = try? await inFlightRefresh.value
+    private func performRefresh(epoch requestedEpoch: Int) async {
+        guard started, requestedEpoch == epoch, isOnline else { return }
+        if let inFlightRefresh, inFlightRefresh.epoch == requestedEpoch {
+            _ = try? await inFlightRefresh.task.value
             return
         }
 
-        let task = Task { [refresh] in try await refresh() }
-        inFlightRefresh = task
+        let deadline = retryAfter
+        let task = Task { [sleeper, refresh] in
+            if let deadline {
+                try await sleeper.sleep(for: max(0, deadline.timeIntervalSinceNow))
+            }
+            return try await refresh()
+        }
+        inFlightRefresh = (requestedEpoch, task)
+
         do {
             let result = try await task.value
+            guard started, epoch == requestedEpoch else { return }
+            retryAfter = nil
             switch result.connectionState {
             case .offline:
                 isOnline = false
-            case .rateLimited(let until):
-                isOnline = true
-                backoffStep = 0
-                if let until, until > Date() {
-                    retryAfter = until
-                }
+            case .rateLimited(let deadline):
+                applyRateLimit(deadline)
             default:
                 isOnline = true
                 backoffStep = 0
             }
-        } catch AppError.rateLimited(let retryAfter) {
-            isOnline = true
-            if let retryAfter, retryAfter > Date() {
-                self.retryAfter = retryAfter
-                backoffStep = 0
-            } else {
+        } catch is CancellationError {
+            return
+        } catch let error as AppError {
+            guard started, epoch == requestedEpoch else { return }
+            switch error {
+            case .rateLimited(let deadline):
+                applyRateLimit(deadline)
+            case .transport, .serverStatus:
+                isOnline = true
+                retryAfter = nil
+                backoffStep = min(backoffStep + 1, 6)
+            default:
+                retryAfter = nil
                 backoffStep = min(backoffStep + 1, 6)
             }
-        } catch AppError.transport, AppError.serverStatus {
-            backoffStep = min(backoffStep + 1, 6)
         } catch {
+            guard started, epoch == requestedEpoch else { return }
+            retryAfter = nil
             backoffStep = min(backoffStep + 1, 6)
         }
+
+        guard inFlightRefresh?.epoch == requestedEpoch else { return }
         inFlightRefresh = nil
+    }
+
+    private func applyRateLimit(_ deadline: Date?) {
+        if let deadline, deadline > now() {
+            retryAfter = deadline
+            backoffStep = 0
+        } else {
+            retryAfter = nil
+            backoffStep = min(backoffStep + 1, 6)
+        }
     }
 
     private static func clamp(_ seconds: TimeInterval) -> TimeInterval {

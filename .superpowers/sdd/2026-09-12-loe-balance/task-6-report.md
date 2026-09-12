@@ -77,3 +77,48 @@ Build complete!
 
 - XCTest is unavailable in the current command-line toolchain, so the new test suite could not be compiled or run here. The test source remains in the requested target and should be run on the macOS/Xcode environment that provides XCTest.
 - Physical network path transitions were not exercised. The monitor adapter is platform-conditional and only publishes status; scheduler behavior is covered by injected calls in the test source.
+
+## Fix Round 1
+
+### Focused XCTest attempt
+
+Command:
+
+```sh
+swift test --filter RefreshSchedulerTests
+```
+
+Result: exit 1. The current command-line toolchain still cannot import XCTest:
+
+```text
+error: no such module 'XCTest'
+```
+
+The new tests now read actor values into locals before XCTest assertions and include timer/manual sharing, no-header 429 fallback, the complete fallback sequence, and stop/in-flight/restart coverage.
+
+### Build and executable harness
+
+Commands:
+
+```sh
+swift build
+git diff --check
+./.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-6/run-harness.sh
+```
+
+Results:
+
+```text
+Build complete!
+task-6 harness passed: immediate, timer/manual sharing, retry-after/fallback, offline/restart/wake, injected sleep
+```
+
+`git diff --check` produced no output. The harness compiles and runs the real `Sources/LoeBalance/Refresh/RefreshScheduler.swift` with actor fakes and injected sleeping; it does not use XCTest, real network, or real polling sleeps.
+
+### Fix scope
+
+- Added epoch guards to loop and refresh task completion paths, including cleanup.
+- Made Retry-After an active shared deadline; success clears it and resets fallback retry state.
+- Added fallback handling for `rateLimited(nil)` and transport/server failures without normal-interval polling spin.
+- Suppressed duplicate network availability callbacks.
+- Added executable harness sources and runner.

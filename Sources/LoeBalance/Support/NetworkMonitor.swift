@@ -12,6 +12,7 @@ final class NetworkMonitor: NetworkMonitoring, @unchecked Sendable {
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "LoeBalance.NetworkMonitor")
     private let statusChanged: @Sendable (Bool) -> Void
+    private var lastAvailability: Bool?
 
     init(statusChanged: @escaping @Sendable (Bool) -> Void) {
         self.statusChanged = statusChanged
@@ -19,7 +20,11 @@ final class NetworkMonitor: NetworkMonitoring, @unchecked Sendable {
 
     func start() {
         monitor.pathUpdateHandler = { [statusChanged] path in
-            statusChanged(path.status == .satisfied)
+            let available = path.status == .satisfied
+            if self.lastAvailability != available {
+                self.lastAvailability = available
+                statusChanged(available)
+            }
         }
         monitor.start(queue: queue)
     }
