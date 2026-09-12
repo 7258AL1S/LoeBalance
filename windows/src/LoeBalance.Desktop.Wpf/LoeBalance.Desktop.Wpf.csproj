@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>LoeBalance.Desktop.Wpf</AssemblyName>
+    <RootNamespace>LoeBalance.Desktop.Wpf</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LoeBalance.Core\LoeBalance.Core.csproj" />
+    <ProjectReference Include="..\LoeBalance.Platform.Windows\LoeBalance.Platform.Windows.csproj" />
+  </ItemGroup>
+</Project>

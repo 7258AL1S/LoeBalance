@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>LoeBalance.Platform.Windows</AssemblyName>
+    <RootNamespace>LoeBalance.Platform.Windows</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LoeBalance.Core\LoeBalance.Core.csproj" />
+  </ItemGroup>
+</Project>

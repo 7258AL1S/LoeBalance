@@ -8,6 +8,11 @@ DerivedData/
 .build-*/
 .swiftpm/
 
+# Windows/.NET build output
+windows/**/bin/
+windows/**/obj/
+windows/artifacts/
+
 # Local development and generated artifacts
 .worktrees/
 dist/

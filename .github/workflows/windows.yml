@@ -1,0 +1,43 @@
+name: Windows Port
+
+on:
+  push:
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows.yml'
+
+jobs:
+  test-and-publish:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        rid: [win-x64, win-x86]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore windows\LoeBalance.Windows.sln
+
+      - name: Build core and shell
+        run: dotnet build windows\LoeBalance.Windows.sln -c Release --no-restore
+
+      - name: Test core
+        run: dotnet test windows\tests\LoeBalance.Core.Tests\LoeBalance.Core.Tests.csproj -c Release --no-build
+
+      - name: Publish ${{ matrix.rid }}
+        run: dotnet publish windows\src\LoeBalance.Desktop.Wpf\LoeBalance.Desktop.Wpf.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o artifacts\${{ matrix.rid }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LoeBalance-${{ matrix.rid }}
+          path: artifacts\${{ matrix.rid }}
