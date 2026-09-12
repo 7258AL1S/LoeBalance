@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 import XCTest
 @testable import LoeBalance
 
@@ -118,6 +119,42 @@ final class DamageAnimationPlannerTests: XCTestCase {
         let plans = DamageAnimationPlanner().plan(events: [], surface: .desktop, reduceMotion: false)
 
         XCTAssertTrue(plans.isEmpty)
+    }
+
+    @MainActor
+    func testDamageLabelsNormalizeMagnitudeAndPreserveDirection() {
+        XCTAssertEqual(
+            DamageStreamView.label(for: .debit(Money(decimal: -1.25))),
+            "-$1.25"
+        )
+        XCTAssertEqual(
+            DamageStreamView.label(for: .credit(Money(decimal: -2.50))),
+            "+$2.50"
+        )
+    }
+
+    @MainActor
+    func testStreamSamplesClockOnceAndInstallsCompletionCleanup() {
+        var clockCalls = 0
+        let view = DamageStreamView(frame: .zero, currentTime: {
+            clockCalls += 1
+            return 100
+        })
+        let plans = DamageAnimationPlanner(random: SequenceRandom(values: [0.5])).plan(
+            events: [.debit(.cents(3)), .debit(.cents(6))],
+            surface: .desktop,
+            reduceMotion: false
+        )
+
+        view.play(plans: plans, anchor: CGPoint(x: 20, y: 20))
+
+        let animations = view.layer?.sublayers?.compactMap {
+            $0.animation(forKey: "damage.position") as? CAKeyframeAnimation
+        } ?? []
+        XCTAssertEqual(clockCalls, 1)
+        XCTAssertEqual(animations.count, 2)
+        XCTAssertEqual(animations[1].beginTime - animations[0].beginTime, 0.23, accuracy: 0.0001)
+        XCTAssertTrue(animations.allSatisfy { $0.delegate != nil })
     }
 }
 

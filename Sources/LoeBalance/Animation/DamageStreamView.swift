@@ -1,20 +1,49 @@
 import AppKit
 import QuartzCore
 
+private final class DamageAnimationCleanupDelegate: NSObject, CAAnimationDelegate {
+    weak var owner: DamageStreamView?
+    weak var textLayer: CATextLayer?
+
+    init(owner: DamageStreamView, textLayer: CATextLayer) {
+        self.owner = owner
+        self.textLayer = textLayer
+    }
+
+    func animationDidStop(_ anim: CAAnimation, finished flag: Bool) {
+        let owner = owner
+        let textLayerID = textLayer.map(ObjectIdentifier.init)
+        DispatchQueue.main.async {
+            owner?.removeCompletedLayer(withID: textLayerID)
+        }
+    }
+}
+
 @MainActor
 final class DamageStreamView: NSView {
     static let fixedSize = NSSize(width: 92, height: 42)
+
+    private let currentTime: () -> CFTimeInterval
+    private var cleanupDelegates: [ObjectIdentifier: DamageAnimationCleanupDelegate] = [:]
 
     override var intrinsicContentSize: NSSize {
         Self.fixedSize
     }
 
     override init(frame frameRect: NSRect) {
+        currentTime = { CACurrentMediaTime() }
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    init(frame frameRect: NSRect, currentTime: @escaping () -> CFTimeInterval) {
+        self.currentTime = currentTime
         super.init(frame: frameRect)
         configure()
     }
 
     required init?(coder: NSCoder) {
+        currentTime = { CACurrentMediaTime() }
         super.init(coder: coder)
         configure()
     }
@@ -22,12 +51,12 @@ final class DamageStreamView: NSView {
     func play(plans: [DamageMotionPlan], anchor: CGPoint) {
         guard !plans.isEmpty else { return }
         guard let hostLayer = layer else { return }
+        let beginTime = hostLayer.convertTime(currentTime(), from: nil)
 
         for plan in plans {
             let textLayer = makeTextLayer(for: plan, anchor: anchor)
             hostLayer.addSublayer(textLayer)
-            addAnimations(for: plan, to: textLayer, anchor: anchor)
-            removeAfterAnimation(textLayer, duration: plan.duration + plan.launchDelay)
+            addAnimations(for: plan, to: textLayer, anchor: anchor, beginTime: beginTime)
         }
     }
 
@@ -48,13 +77,18 @@ final class DamageStreamView: NSView {
         textLayer.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         textLayer.fontSize = 13
         textLayer.foregroundColor = color(for: plan).cgColor
-        textLayer.string = label(for: plan.event)
+        textLayer.string = Self.label(for: plan.event)
         textLayer.opacity = 0
         textLayer.frame = CGRect(x: anchor.x - 46, y: anchor.y - 10, width: 92, height: 20)
         return textLayer
     }
 
-    private func addAnimations(for plan: DamageMotionPlan, to textLayer: CATextLayer, anchor: CGPoint) {
+    private func addAnimations(
+        for plan: DamageMotionPlan,
+        to textLayer: CATextLayer,
+        anchor: CGPoint,
+        beginTime: CFTimeInterval
+    ) {
         let position = CAKeyframeAnimation(keyPath: "position")
         position.values = [
             NSValue(point: anchor),
@@ -82,13 +116,16 @@ final class DamageStreamView: NSView {
         ]
         rotation.keyTimes = [0, 0.15, 0.72, 1]
 
-        let beginTime = textLayer.convertTime(CACurrentMediaTime(), from: nil) + plan.launchDelay
         for animation in [position, opacity, scale, rotation] {
-            animation.beginTime = beginTime
+            animation.beginTime = beginTime + plan.launchDelay
             animation.duration = plan.duration
             animation.fillMode = .backwards
             animation.isRemovedOnCompletion = true
         }
+
+        let cleanupDelegate = DamageAnimationCleanupDelegate(owner: self, textLayer: textLayer)
+        cleanupDelegates[ObjectIdentifier(textLayer)] = cleanupDelegate
+        position.delegate = cleanupDelegate
 
         textLayer.add(position, forKey: "damage.position")
         textLayer.add(opacity, forKey: "damage.opacity")
@@ -96,19 +133,23 @@ final class DamageStreamView: NSView {
         textLayer.add(rotation, forKey: "damage.rotation")
     }
 
-    private func removeAfterAnimation(_ textLayer: CATextLayer, duration: TimeInterval) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self, weak textLayer] in
-            guard let self, let textLayer, textLayer.superlayer === self.layer else { return }
+    fileprivate func removeCompletedLayer(withID textLayerID: ObjectIdentifier?) {
+        guard let textLayerID,
+              let cleanupDelegate = cleanupDelegates.removeValue(forKey: textLayerID),
+              let textLayer = cleanupDelegate.textLayer else {
+            return
+        }
+        if textLayer.superlayer === layer {
             textLayer.removeFromSuperlayer()
         }
     }
 
-    private func label(for event: BalanceAnimationEvent) -> String {
+    static func label(for event: BalanceAnimationEvent) -> String {
         switch event {
         case let .debit(amount):
-            "-\(amount.currencyText)"
+            "-\(amount.magnitude.currencyText)"
         case let .credit(amount):
-            "+\(amount.currencyText)"
+            "+\(amount.magnitude.currencyText)"
         }
     }
 

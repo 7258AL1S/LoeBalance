@@ -17,6 +17,15 @@ final class HarnessRandom: MotionRandomizing, @unchecked Sendable {
     }
 }
 
+final class HarnessClock {
+    private(set) var calls = 0
+
+    func now() -> CFTimeInterval {
+        calls += 1
+        return 100
+    }
+}
+
 @main
 @MainActor
 struct Task7Harness {
@@ -86,13 +95,25 @@ struct Task7Harness {
         assert(reducedPlan.shakeStrength == nil, "Reduce Motion disables shake")
         assert(reducedPlan.duration < desktopPlans[0].duration && reducedPlan.rise < desktopPlans[0].rise, "Reduce Motion shortens movement")
 
-        let view = DamageStreamView(frame: .zero)
+        assert(DamageStreamView.label(for: .debit(Money(decimal: -1.25))) == "-$1.25", "negative debit uses one direction sign")
+        assert(DamageStreamView.label(for: .credit(Money(decimal: -2.50))) == "+$2.50", "negative credit uses one direction sign")
+
+        let clock = HarnessClock()
+        let view = DamageStreamView(frame: .zero, currentTime: clock.now)
         let fixedFrame = view.frame
         let fixedIntrinsicSize = view.intrinsicContentSize
         view.play(plans: desktopPlans, anchor: CGPoint(x: 40, y: 20))
         assert(view.frame == fixedFrame, "playing does not resize the owner view")
         assert(view.intrinsicContentSize == fixedIntrinsicSize && fixedIntrinsicSize == DamageStreamView.fixedSize, "stream has fixed owner size")
         assert(view.layer?.sublayers?.count == desktopPlans.count, "one layer per plan")
+        assert(clock.calls == 1, "burst samples one shared begin time")
+
+        let positionAnimations = view.layer?.sublayers?.compactMap {
+            $0.animation(forKey: "damage.position") as? CAKeyframeAnimation
+        } ?? []
+        assert(positionAnimations.count == desktopPlans.count, "position animation per bead")
+        assert(abs((positionAnimations[1].beginTime - positionAnimations[0].beginTime) - 0.23) < 0.0001, "beads preserve delayed cadence")
+        assert(positionAnimations.allSatisfy { $0.delegate != nil }, "cleanup is animation-completion based")
 
         print("task-7 harness passed: cadence, ranges, deterministic randomness, styles, burst shake, Reduce Motion, fixed stream size")
     }

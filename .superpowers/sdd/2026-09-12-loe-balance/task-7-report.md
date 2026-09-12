@@ -112,3 +112,69 @@ Result: exit 0; no output.
 - XCTest could not be compiled or executed on this machine because `/Library/Developer/CommandLineTools` does not provide the XCTest module. The executable harness covers the requested planner and stream invariants instead; XCTest should be run under an Xcode toolchain.
 - The stream view receives `reduceMotion` and shake settings through its caller via planned values; system accessibility preference wiring belongs to the later UI/controller task.
 - Runtime visual appearance and card-level shake execution require a running macOS app and were not physically observed in this headless harness.
+
+## Fix Round 1: Review Findings
+
+Date: 2026-09-12
+Base: `68a0e2d`
+
+### Changes
+
+- `DamageStreamView.play` now captures one converted `CACurrentMediaTime()` value and reuses it for every bead, while retaining each plan's launch delay.
+- Replaced wall-clock `DispatchQueue.main.asyncAfter` removal with a retained `CAAnimationDelegate` attached to the position animation. Completion returns to the main actor by layer identity and removes the completed text layer.
+- Debit and credit visible text now formats `Money.magnitude`, preserving `-`/`+` event direction without rendering double signs for negative values.
+- Added focused XCTest assertions and harness assertions for label normalization, one clock sample per burst, 230 ms delayed cadence, and completion-delegate cleanup installation.
+
+### Commands and outputs
+
+Test-first focused attempt after adding the regression assertions and before the production fix:
+
+```sh
+swift test --filter DamageAnimationPlannerTests
+```
+
+Result: exit 1 because this Command Line Tools environment has no XCTest module:
+
+```text
+error: no such module 'XCTest'
+```
+
+Focused XCTest attempt after the fix:
+
+```sh
+swift test --filter DamageAnimationPlannerTests
+```
+
+Result: exit 1 for the same environment limitation:
+
+```text
+error: no such module 'XCTest'
+```
+
+Build, warnings-as-errors harness, and diff validation:
+
+```sh
+swift build && ./.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-7/run-harness.sh && git diff --check
+```
+
+Result: exit 0.
+
+```text
+Build complete! (0.35s)
+task-7 harness passed: cadence, ranges, deterministic randomness, styles, burst shake, Reduce Motion, fixed stream size
+```
+
+`git diff --check` produced no output.
+
+### Self-review
+
+- One `play` call samples the clock exactly once; all animation begin times derive from that shared value plus the planner's 0.23-second launch delay.
+- Cleanup is tied to Core Animation completion rather than an independently estimated wall-clock deadline, and the delegate is retained per text layer until completion.
+- Completion cleanup handles both finished and interrupted animation callbacks and removes only the layer identified by that delegate.
+- Negative amounts are normalized only for visible text; the underlying `BalanceAnimationEvent` and debit/credit style remain unchanged.
+- The diff contains no Task 5 source or behavior changes.
+
+### Concerns
+
+- XCTest remains unexecutable with `/Library/Developer/CommandLineTools` because `XCTest` is unavailable; the complete test source is retained for an Xcode toolchain.
+- The headless harness verifies delegate installation and shared timing, but does not visually observe animation completion in a running window.
