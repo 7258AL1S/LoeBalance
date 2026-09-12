@@ -29,6 +29,7 @@ final class StatusBarController: NSObject, StatusBarPresenting {
     private let desktopCardItem: NSMenuItem
     private let settingsItem: NSMenuItem
     private let logoutItem: NSMenuItem
+    private let quitItem: NSMenuItem
     private let dateFormatter: DateFormatter
 
     init(statusItem: NSStatusItem, commands: StatusBarCommands) {
@@ -42,6 +43,7 @@ final class StatusBarController: NSObject, StatusBarPresenting {
         self.desktopCardItem = NSMenuItem(title: "Show Desktop Card", action: #selector(toggleDesktopCard(_:)), keyEquivalent: "d")
         self.settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings(_:)), keyEquivalent: ",")
         self.logoutItem = NSMenuItem(title: "Log Out", action: #selector(logout(_:)), keyEquivalent: "")
+        self.quitItem = NSMenuItem(title: "Quit LoeBalance", action: #selector(quit(_:)), keyEquivalent: "q")
         self.dateFormatter = DateFormatter()
         super.init()
         configure()
@@ -105,7 +107,15 @@ final class StatusBarController: NSObject, StatusBarPresenting {
         for item in [balanceSummaryItem, connectionSummaryItem] {
             item.isEnabled = false
         }
-        for item in [refreshItem, desktopCardItem, settingsItem, logoutItem] {
+        balanceSummaryItem.identifier = NSUserInterfaceItemIdentifier("balance-summary")
+        connectionSummaryItem.identifier = NSUserInterfaceItemIdentifier("connection-summary")
+        refreshItem.identifier = NSUserInterfaceItemIdentifier("refresh-now")
+        desktopCardItem.identifier = NSUserInterfaceItemIdentifier("toggle-desktop-card")
+        settingsItem.identifier = NSUserInterfaceItemIdentifier("settings")
+        logoutItem.identifier = NSUserInterfaceItemIdentifier("logout")
+        quitItem.identifier = NSUserInterfaceItemIdentifier("quit")
+
+        for item in [refreshItem, desktopCardItem, settingsItem, logoutItem, quitItem] {
             item.target = self
         }
         menu.autoenablesItems = false
@@ -117,8 +127,6 @@ final class StatusBarController: NSObject, StatusBarPresenting {
         menu.addItem(settingsItem)
         menu.addItem(.separator())
         menu.addItem(logoutItem)
-        let quitItem = NSMenuItem(title: "Quit LoeBalance", action: #selector(quit(_:)), keyEquivalent: "q")
-        quitItem.target = self
         menu.addItem(quitItem)
 
         statusItem.length = Self.statusItemLength

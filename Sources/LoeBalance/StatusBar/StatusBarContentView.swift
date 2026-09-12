@@ -1,5 +1,11 @@
 import AppKit
 
+private final class FrameAlignedStatusLabel: NSTextField {
+    override var alignmentRectInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
+}
+
 @MainActor
 final class StatusBarContentView: NSView {
     static let fixedDamageWidth: CGFloat = 54
@@ -16,7 +22,7 @@ final class StatusBarContentView: NSView {
     )
 
     let statusDot = NSView()
-    let balanceLabel = NSTextField(labelWithString: "--")
+    let balanceLabel: NSTextField = FrameAlignedStatusLabel(labelWithString: "--")
     let damageStreamView = DamageStreamView(frame: .zero)
 
     var damageAreaWidth: CGFloat { Self.fixedDamageWidth }

@@ -23,6 +23,9 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertEqual(view.damageAreaWidth, 54)
         XCTAssertEqual(view.damageStreamView.frame.width, 54)
         XCTAssertEqual(view.damageStreamView.frame.minX, view.balanceLabel.frame.maxX + 2, accuracy: 0.01)
+        let damageMask = try! XCTUnwrap(view.damageStreamView.layer?.mask)
+        XCTAssertEqual(damageMask.frame.minX, 0, accuracy: 0.01)
+        XCTAssertEqual(damageMask.frame.width, 54, accuracy: 0.01)
         XCTAssertNil(view.hitTest(CGPoint(x: 1, y: 1)))
     }
 
@@ -37,24 +40,35 @@ final class StatusBarControllerTests: XCTestCase {
 
         controller.present(snapshot: snapshot, connection: .online, showsDesktopCard: true)
         let balanceBefore = controller.contentView.balanceLabel.stringValue
+        let frameBefore = controller.contentView.balanceLabel.frame
         let widthBefore = controller.contentView.bounds.width
 
-        controller.play(events: [.debit(.cents(30)), .credit(.cents(5))], reduceMotion: false)
+        controller.play(
+            events: [
+                .debit(.cents(30)), .debit(.cents(29)), .debit(.cents(28)),
+                .debit(.cents(27)), .debit(.cents(26)), .credit(.cents(5))
+            ],
+            reduceMotion: false
+        )
 
         XCTAssertEqual(controller.contentView.balanceLabel.stringValue, balanceBefore)
+        XCTAssertEqual(controller.contentView.balanceLabel.frame, frameBefore)
         XCTAssertEqual(controller.contentView.bounds.width, widthBefore)
         XCTAssertEqual(controller.statusItem.length, StatusBarContentView.fixedSize.width)
+        XCTAssertEqual(controller.contentView.damageStreamView.layer?.sublayers?.count, 6)
     }
 
     func testCommandsInvokeTheirClosures() {
         let recorder = CommandRecorder()
         let controller = makeController(commands: recorder.commands)
 
-        controller.refreshNow(nil)
-        controller.toggleDesktopCard(nil)
-        controller.openSettings(nil)
-        controller.logout(nil)
-        controller.quit(nil)
+        for identifier in ["refresh-now", "toggle-desktop-card", "settings", "logout", "quit"] {
+            let item = try! XCTUnwrap(
+                controller.menu.items.first { $0.identifier?.rawValue == identifier }
+            )
+            let action = try! XCTUnwrap(item.action)
+            XCTAssertTrue(NSApp.sendAction(action, to: item.target, from: item))
+        }
 
         XCTAssertEqual(recorder.refreshCount, 1)
         XCTAssertEqual(recorder.toggleCount, 1)
@@ -105,11 +119,19 @@ final class StatusBarControllerTests: XCTestCase {
         controller.present(snapshot: snapshot, connection: .online, showsDesktopCard: false)
 
         let titles = controller.menu.items.map { $0.isSeparatorItem ? "|" : $0.title }
+        let identifiers = controller.menu.items.map { $0.identifier?.rawValue ?? "|" }
         XCTAssertEqual(titles[0], "Balance: $1.25")
         XCTAssertTrue(titles[1].hasPrefix("Online · Updated "))
         XCTAssertEqual(
             Array(titles.dropFirst(2)),
             ["|", "Refresh Now", "Show Desktop Card", "Settings", "|", "Log Out", "Quit LoeBalance"]
+        )
+        XCTAssertEqual(
+            identifiers,
+            [
+                "balance-summary", "connection-summary", "|", "refresh-now",
+                "toggle-desktop-card", "settings", "|", "logout", "quit"
+            ]
         )
         XCTAssertEqual(controller.menu.items.count, initialItems.count)
         XCTAssertTrue(zip(initialItems, controller.menu.items).allSatisfy { $0 === $1 })
