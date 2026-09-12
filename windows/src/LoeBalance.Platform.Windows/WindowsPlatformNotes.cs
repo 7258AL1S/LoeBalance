@@ -3,8 +3,10 @@ namespace LoeBalance.Platform.Windows;
 public static class WindowsPlatformNotes
 {
     public const string CredentialManagerTarget = "LoeBalance:sub2api-refresh-token";
+    public const string CredentialUserName = "LoeBalance";
     public const string SettingsDirectory = "%LOCALAPPDATA%\\LoeBalance";
-    public const string StartupRegistryKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    public const string StartupRegistrySubKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    public const string StartupRegistryKey = @"HKCU\" + StartupRegistrySubKey;
 
     public const string DesktopWindowRequirements =
         "Use a borderless WPF window with ShowInTaskbar=false, no activation on show, Topmost=false, " +
@@ -12,4 +14,7 @@ public static class WindowsPlatformNotes
 
     public const string TrayBehavior =
         "Use NotifyIcon for the notification area. Show the balance in tooltip/context menu; keep floating debit text in the desktop card.";
+
+    public const string SecurityRule =
+        "Persist only the refresh token and user id. Never write the password or the access token to disk, logs, or settings.";
 }

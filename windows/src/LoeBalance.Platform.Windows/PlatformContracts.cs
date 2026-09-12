@@ -5,7 +5,12 @@ namespace LoeBalance.Platform.Windows;
 
 public interface IWindowsCredentialStore : LoeBalance.Core.Auth.ICredentialStore { }
 
-public interface IWindowsSettingsStore : ISettingsStore, ISnapshotStore { }
+// ISettingsStore and ISnapshotStore both declare `LoadAsync(CancellationToken)` with
+// different return types, so they cannot be combined into one interface or implemented by
+// a single class. The Windows layer keeps them as two focused adapters.
+public interface IWindowsSettingsStore : ISettingsStore { }
+
+public interface IWindowsSnapshotStore : ISnapshotStore { }
 
 public interface INetworkAvailabilityMonitor : IDisposable
 {
