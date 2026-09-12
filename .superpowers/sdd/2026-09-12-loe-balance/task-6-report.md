@@ -122,3 +122,46 @@ task-6 harness passed: immediate, timer/manual sharing, retry-after/fallback, of
 - Added fallback handling for `rateLimited(nil)` and transport/server failures without normal-interval polling spin.
 - Suppressed duplicate network availability callbacks.
 - Added executable harness sources and runner.
+
+## Fix Round 2
+
+### Focused XCTest
+
+Command:
+
+```sh
+swift test --filter RefreshSchedulerTests
+```
+
+Result: exit 1 because this environment has no XCTest module:
+
+```text
+error: no such module 'XCTest'
+```
+
+### Build, diff, and executable harness
+
+Commands:
+
+```sh
+swift build
+git diff --check
+./.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-6/run-harness.sh
+```
+
+Results:
+
+```text
+Build complete! (0.33s)
+task-6 harness passed: immediate, timer/manual sharing, retry-after/fallback, offline/restart/wake, injected sleep
+```
+
+`git diff --check` produced no output.
+
+### Fixes
+
+- Automatic polling now requests the active Retry-After remaining duration before normal interval/backoff; manual, wake, and recovery paths share the same deadline task.
+- Added timer/manual single-flight coverage with a gated timer refresh.
+- Stop clears retry deadline and backoff state; restart coverage uses the same scheduler instance.
+- Added fixed-clock executable assertion for a 120-second Retry-After sleep request.
+- Injected refresh closures remain explicitly `@Sendable`; harness output is warning-free.

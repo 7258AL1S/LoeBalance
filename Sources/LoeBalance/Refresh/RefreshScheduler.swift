@@ -60,6 +60,9 @@ actor RefreshScheduler: RefreshScheduling {
     func stop() {
         epoch += 1
         started = false
+        retryAfter = nil
+        backoffStep = 0
+        isOnline = true
         loopTask?.cancel()
         loopTask = nil
         inFlightRefresh?.task.cancel()
@@ -106,6 +109,9 @@ actor RefreshScheduler: RefreshScheduling {
 
     private func nextDelay() -> TimeInterval {
         guard isOnline else { return interval }
+        if let retryAfter {
+            return max(0, retryAfter.timeIntervalSince(now()))
+        }
         return backoffStep == 0 ? interval : [10, 20, 40, 80, 160, 300][min(backoffStep - 1, 5)]
     }
 
@@ -117,9 +123,9 @@ actor RefreshScheduler: RefreshScheduling {
         }
 
         let deadline = retryAfter
-        let task = Task { [sleeper, refresh] in
+        let task = Task { [now, sleeper, refresh] in
             if let deadline {
-                try await sleeper.sleep(for: max(0, deadline.timeIntervalSinceNow))
+                try await sleeper.sleep(for: max(0, deadline.timeIntervalSince(now())))
             }
             return try await refresh()
         }

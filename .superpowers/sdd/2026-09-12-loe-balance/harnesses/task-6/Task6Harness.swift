@@ -1,6 +1,6 @@
 import Foundation
 
-enum AppError: Error { case rateLimited(Date?), transport, serverStatus(Int) }
+enum AppError: Error { case rateLimited(Date?), transport, serverStatus(Int), other }
 enum ConnectionState { case online, offline, rateLimited(Date?) }
 struct RefreshResult { let connectionState: ConnectionState }
 
@@ -21,6 +21,9 @@ actor HarnessSleeper: AsyncSleeping {
 
     func release() { guard !waiters.isEmpty else { return }; waiters.removeFirst().resume() }
     func releaseAll() { let pending = waiters; waiters.removeAll(); pending.forEach { $0.resume() } }
+    func waitUntilRequested(_ count: Int) async {
+        while requests.count < count { await Task.yield() }
+    }
 }
 
 actor HarnessRefresh {
@@ -46,7 +49,8 @@ actor HarnessRefresh {
 struct Task6Harness {
     static func main() async throws {
         let sleeper = HarnessSleeper()
-        let retryAt = Date().addingTimeInterval(0.01)
+        let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
+        let retryAt = fixedNow.addingTimeInterval(120)
         let refresh = HarnessRefresh([
             .success(RefreshResult(connectionState: .online)),
             .failure(AppError.rateLimited(nil)),
@@ -54,7 +58,7 @@ struct Task6Harness {
             .success(RefreshResult(connectionState: .offline)),
             .success(RefreshResult(connectionState: .online))
         ])
-        let scheduler = RefreshScheduler(interval: 30, sleeper: sleeper, refresh: refresh.run)
+        let scheduler = RefreshScheduler(interval: 30, sleeper: sleeper, now: { fixedNow }, refresh: { try await refresh.run() })
 
         await scheduler.start()
         Task {
@@ -63,8 +67,13 @@ struct Task6Harness {
         }
         let callsAfterStart = await refresh.calls
         assert(callsAfterStart == 1, "immediate start")
+        await sleeper.waitUntilRequested(1)
         await sleeper.release()
-        await Task.yield()
+        await sleeper.waitUntilRequested(2)
+        await sleeper.release()
+        await sleeper.waitUntilRequested(3)
+        let retrySleep = await sleeper.requests.last
+        assert(retrySleep == 120, "automatic polling honors Retry-After")
         await scheduler.refreshNow()
         let callsBeforeTimer = await refresh.calls
         assert(callsBeforeTimer >= 2, "timer and manual remain serialized")

@@ -77,6 +77,24 @@ final class RefreshSchedulerTests: XCTestCase {
         await scheduler.stop()
     }
 
+    func testTimerAndManualRefreshShareTheSameInFlightTask() async {
+        let sleeper = RecordingSleeper()
+        let recorder = RefreshRecorder()
+        let scheduler = RefreshScheduler(interval: 30, sleeper: sleeper, refresh: recorder.run)
+
+        await scheduler.start()
+        await recorder.blockNextRefresh()
+        await sleeper.releaseNextSleep()
+        await recorder.waitUntilStarted()
+        async let manual = scheduler.refreshNow()
+        await Task.yield()
+        let callsWhileBlocked = await recorder.callCount
+        XCTAssertEqual(callsWhileBlocked, 2)
+        await recorder.release()
+        await manual
+        await scheduler.stop()
+    }
+
     func testFailuresUseBoundedExponentialBackoff() async {
         let sleeper = RecordingSleeper()
         let recorder = RefreshRecorder(errors: [AppError.transport(URLError(.timedOut)), AppError.transport(URLError(.timedOut))])
@@ -119,12 +137,11 @@ final class RefreshSchedulerTests: XCTestCase {
         await recorder.release()
         await firstStart
 
-        let restarted = RefreshRecorder()
-        let replacement = RefreshScheduler(interval: 30, sleeper: sleeper, refresh: restarted.run)
-        await replacement.start()
-        let calls = await restarted.callCount
+        await recorder.unblock()
+        await scheduler.start()
+        let calls = await recorder.callCount
         XCTAssertEqual(calls, 1)
-        await replacement.stop()
+        await scheduler.stop()
     }
 
     func testStopCancelsLoopAndPendingSleep() async {
@@ -185,9 +202,10 @@ actor RecordingSleeper: AsyncSleeping {
 actor RefreshRecorder {
     private(set) var callCount = 0
     private var results: [Result<RefreshResult, Error>]
-    private let blocked: Bool
+    private var blocked: Bool
     private var started = false
     private var continuation: CheckedContinuation<Void, Never>?
+    private var blockNext = false
 
     init(results: [RefreshResult] = [.fixture()], errors: [Error] = [], blocked: Bool = false) {
         self.results = results.map(Result.success) + errors.map(Result.failure)
@@ -199,7 +217,10 @@ actor RefreshRecorder {
         started = true
         continuation?.resume()
         continuation = nil
-        if blocked { await withCheckedContinuation { continuation = $0 } }
+        if blocked || blockNext {
+            blockNext = false
+            await withCheckedContinuation { continuation = $0 }
+        }
         guard !results.isEmpty else { return .fixture() }
         return try results.removeFirst().get()
     }
@@ -209,6 +230,8 @@ actor RefreshRecorder {
     }
 
     func release() { continuation?.resume(); continuation = nil }
+    func blockNextRefresh() { blockNext = true }
+    func unblock() { blocked = false }
 }
 
 private extension RefreshResult {
