@@ -7,6 +7,10 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>LoeBalance.Desktop.Wpf</AssemblyName>
     <RootNamespace>LoeBalance.Desktop.Wpf</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <RuntimeIdentifiers>win-x64;win-x86</RuntimeIdentifiers>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\LoeBalance.Core\LoeBalance.Core.csproj" />

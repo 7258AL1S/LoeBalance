@@ -1,0 +1,72 @@
+<Window x:Class="LoeBalance.Desktop.Wpf.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings"
+        Width="420"
+        Height="360"
+        ResizeMode="NoResize"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" FontSize="12" Foreground="#5A6472" Text="Shake" />
+        <ComboBox x:Name="ShakeBox"
+                  Grid.Row="1"
+                  Margin="0,4,0,0"
+                  SelectionChanged="OnShakeChanged">
+            <ComboBoxItem Content="Off" />
+            <ComboBoxItem Content="Weak" />
+            <ComboBoxItem Content="Strong" />
+        </ComboBox>
+
+        <StackPanel Grid.Row="2" Margin="0,14,0,0">
+            <TextBlock FontSize="12" Foreground="#5A6472" Text="Refresh" />
+            <ComboBox x:Name="RefreshBox" Margin="0,4,0,0" SelectionChanged="OnRefreshPresetChanged">
+                <ComboBoxItem Content="30 seconds" />
+                <ComboBoxItem Content="1 minute" />
+                <ComboBoxItem Content="5 minutes" />
+                <ComboBoxItem Content="Custom" />
+            </ComboBox>
+            <StackPanel x:Name="CustomPanel" Margin="0,8,0,0" Orientation="Horizontal">
+                <TextBox x:Name="CustomIntervalBox" Width="90" Padding="6" />
+                <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" Foreground="#5A6472" Text="seconds" />
+                <Button x:Name="ApplyButton" Margin="12,0,0,0" Padding="12,4" Click="OnApplyIntervalClick" Content="Apply" />
+            </StackPanel>
+        </StackPanel>
+
+        <CheckBox x:Name="DesktopCardCheck"
+                  Grid.Row="3"
+                  Margin="0,16,0,0"
+                  Click="OnDesktopCardToggled"
+                  Content="Show Desktop Card" />
+
+        <CheckBox x:Name="LaunchAtLoginCheck"
+                  Grid.Row="4"
+                  Margin="0,8,0,0"
+                  Click="OnLaunchAtLoginToggled"
+                  Content="Launch at Login" />
+
+        <TextBlock x:Name="ErrorText"
+                   Grid.Row="5"
+                   Margin="0,14,0,0"
+                   FontSize="12"
+                   Foreground="#C62828"
+                   TextWrapping="Wrap" />
+
+        <Button x:Name="LogOutButton"
+                Grid.Row="6"
+                HorizontalAlignment="Right"
+                Padding="12,4"
+                Click="OnLogOutClick"
+                Content="Log Out" />
+    </Grid>
+</Window>

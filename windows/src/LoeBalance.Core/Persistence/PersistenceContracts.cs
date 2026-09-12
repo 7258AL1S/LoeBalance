@@ -43,8 +43,13 @@ public sealed record AppPreferences(
 {
     public double ClampedRefreshIntervalSeconds => Math.Clamp(RefreshIntervalSeconds, 1, 3600);
 
+    public static AppPreferences Empty => new();
+
     public AppPreferences WithClampedRefreshInterval()
         => this with { RefreshIntervalSeconds = ClampedRefreshIntervalSeconds };
+
+    public AppPreferences WithRefreshInterval(double seconds)
+        => this with { RefreshIntervalSeconds = Math.Clamp(seconds, 1, 3600) };
 }
 
 public sealed record PersistedSnapshotState(
