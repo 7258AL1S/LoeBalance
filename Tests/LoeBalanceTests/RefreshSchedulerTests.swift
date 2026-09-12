@@ -85,7 +85,7 @@ final class RefreshSchedulerTests: XCTestCase {
         await scheduler.start()
         await recorder.blockNextRefresh()
         await sleeper.releaseNextSleep()
-        await recorder.waitUntilStarted()
+        await recorder.waitUntilBlocked()
         async let manual = scheduler.refreshNow()
         await Task.yield()
         let callsWhileBlocked = await recorder.callCount
@@ -205,6 +205,8 @@ actor RefreshRecorder {
     private var blocked: Bool
     private var started = false
     private var continuation: CheckedContinuation<Void, Never>?
+    private var blockedContinuation: CheckedContinuation<Void, Never>?
+    private var isBlocked = false
     private var blockNext = false
 
     init(results: [RefreshResult] = [.fixture()], errors: [Error] = [], blocked: Bool = false) {
@@ -219,7 +221,11 @@ actor RefreshRecorder {
         continuation = nil
         if blocked || blockNext {
             blockNext = false
+            isBlocked = true
+            blockedContinuation?.resume()
+            blockedContinuation = nil
             await withCheckedContinuation { continuation = $0 }
+            isBlocked = false
         }
         guard !results.isEmpty else { return .fixture() }
         return try results.removeFirst().get()
@@ -227,6 +233,10 @@ actor RefreshRecorder {
 
     func waitUntilStarted() async {
         if !started { await withCheckedContinuation { continuation = $0 } }
+    }
+
+    func waitUntilBlocked() async {
+        if !isBlocked { await withCheckedContinuation { blockedContinuation = $0 } }
     }
 
     func release() { continuation?.resume(); continuation = nil }

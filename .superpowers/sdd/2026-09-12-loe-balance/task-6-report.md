@@ -206,3 +206,44 @@ The harness invokes `swiftc -warnings-as-errors`; it completed without warnings.
 - Moved normal interval/backoff and Retry-After waiting into the shared in-flight refresh task, so timer/manual/wake/recovery triggers coalesce around one eligible deadline and one request.
 - Added an explicit timer-entry barrier before invoking manual refresh and asserted the closure count remains unchanged while the timer refresh is blocked.
 - Added an executable assertion that manual refresh during a scheduled Retry-After wait produces one post-deadline request.
+
+## Fix Round 4
+
+### Focused XCTest
+
+Command:
+
+```sh
+swift test --filter RefreshSchedulerTests
+```
+
+Result: exit 1 because the current command-line toolchain has no XCTest module:
+
+```text
+error: no such module 'XCTest'
+```
+
+### Build, warning-free executable harness, and diff
+
+Commands:
+
+```sh
+swift build
+./.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-6/run-harness.sh
+git diff --check
+```
+
+Results:
+
+```text
+Build complete! (0.33s)
+task-6 harness passed: timer/manual barrier, shared Retry-After deadline, single request
+```
+
+The harness uses `swiftc -warnings-as-errors` and completed without warnings. `git diff --check` produced no output.
+
+### Fix
+
+- Replaced the timer/manual test's stale `started` synchronization with an actor `waitUntilBlocked()` continuation signaled only after the timer-triggered refresh closure enters its blocking section.
+- Kept the same-scheduler restart and shared Retry-After coverage unchanged.
+- No harness change was necessary because its existing call-count barrier already proves timer entry before the manual refresh.
