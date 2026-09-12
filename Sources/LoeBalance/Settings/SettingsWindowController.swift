@@ -3,7 +3,10 @@ import SwiftUI
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
+    private let viewModel: SettingsViewModel
+
     init(viewModel: SettingsViewModel) {
+        self.viewModel = viewModel
         let hostingController = NSHostingController(rootView: SettingsView(viewModel: viewModel))
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Settings"
@@ -22,5 +25,10 @@ final class SettingsWindowController: NSWindowController {
         showWindow(nil)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    @discardableResult
+    func setShowsDesktopCard(_ value: Bool) -> Bool {
+        viewModel.setShowsDesktopCard(value)
     }
 }

@@ -15,6 +15,7 @@ protocol RefreshScheduling: Actor {
     func stop()
     func updateInterval(_ seconds: TimeInterval)
     func refreshNow() async
+    func networkBecameUnavailable()
     func networkBecameAvailable() async
     func systemDidWake() async
 }
@@ -71,6 +72,11 @@ actor RefreshScheduler: RefreshScheduling {
 
     func updateInterval(_ seconds: TimeInterval) {
         interval = Self.clamp(seconds)
+    }
+
+    func networkBecameUnavailable() {
+        isOnline = false
+        retryAfter = nil
     }
 
     func refreshNow() async {

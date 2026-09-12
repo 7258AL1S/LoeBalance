@@ -67,3 +67,45 @@ The static harness verifies the real source files for the coordinator API, injec
 ## Commit
 
 `feat: integrate LoeBalance application lifecycle`
+
+## Fix Round 1
+
+Base: `ae6a3e3`
+
+### Findings Addressed
+
+- Refresh failures now reach `AppCoordinator`, map to offline/rate-limited/login-required/invalid-data connection states, preserve the last snapshot, update both surfaces, and never play animations on failure.
+- Network loss now presents the cached snapshot as offline and pauses `RefreshScheduler`; recovery resumes scheduling and requests an immediate refresh.
+- Menu-bar desktop-card toggles now go through `SettingsViewModel` persistence before coordinator/card/menu state changes. Failed saves retain the previous state and surface the settings error.
+- App termination now uses `applicationShouldTerminate`, `.terminateLater`, awaited scheduler shutdown, and `NSApp.reply(toApplicationShouldTerminate: true)`.
+- Logout marks the coordinator unauthenticated and clears the visible baseline before the first await, so queued refresh results are ignored.
+- Auth restore only invalidates credentials for authentication-invalid errors. Transport, server, and rate-limit failures preserve credentials; the coordinator keeps retry/recovery active and presents the initial cached snapshot with the mapped connection state.
+
+Focused XCTest sources were extended for failure mapping, network loss, transactional menu toggles, and transient restore recovery. XCTest was intentionally not run in this fix round.
+
+The Task 11 harness remains a bounded static/focused check and does not invoke full-source `swiftc`.
+
+### Verification
+
+Final verification commands:
+
+```sh
+swift build
+./.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-11/run-harness.sh
+git diff --check
+```
+
+Results:
+
+- `swift build`: passed, `Build complete! (3.88s)`.
+- Task 11 bounded static harness: passed: `task-11 static harness passed: composition root, lifecycle transitions, ordered presentation, logging categories, and coordinator tests`.
+- `git diff --check`: passed.
+
+### Remaining Concerns
+
+- Full SwiftPM/XCTest execution remains blocked by the active Command Line Tools sandbox; the new focused tests remain for a normal Xcode toolchain.
+- Live AppKit termination, network path callbacks, Keychain behavior, and settings-window visual synchronization were not exercised.
+
+### Commit
+
+Commit message: `fix: harden application lifecycle integration`.

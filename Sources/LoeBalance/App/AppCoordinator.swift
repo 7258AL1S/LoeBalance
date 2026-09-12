@@ -15,6 +15,8 @@ protocol BalanceServicing: Sendable {
 @MainActor
 protocol SettingsWindowPresenting: AnyObject {
     func present()
+    @discardableResult
+    func setShowsDesktopCard(_ value: Bool) -> Bool
 }
 
 extension SettingsWindowController: SettingsWindowPresenting {}
@@ -55,6 +57,14 @@ private final class CoordinatorBridge {
         coordinator?.networkBecameAvailable()
     }
 
+    func deliverNetworkUnavailable() {
+        coordinator?.networkBecameUnavailable()
+    }
+
+    func deliverFailure(_ error: Error) {
+        coordinator?.handleRefreshFailure(error)
+    }
+
     func refreshNow() {
         coordinator?.refreshNow()
     }
@@ -92,6 +102,7 @@ final class AppCoordinator {
         let settingsWindow: any SettingsWindowPresenting
         let openLogin: @MainActor () -> Void
         let initialPreferences: AppPreferences
+        let initialSnapshot: BalanceSnapshot?
         let reduceMotion: Bool
     }
 
@@ -104,6 +115,7 @@ final class AppCoordinator {
     private let settingsWindow: any SettingsWindowPresenting
     private let openLoginAction: @MainActor () -> Void
     private let reduceMotion: Bool
+    private let initialSnapshot: BalanceSnapshot?
 
     private(set) var shakeStrength: ShakeStrength
     private(set) var showsDesktopCard: Bool
@@ -123,6 +135,7 @@ final class AppCoordinator {
         openLoginAction = dependencies.openLogin
         shakeStrength = dependencies.initialPreferences.shakeStrength
         showsDesktopCard = dependencies.initialPreferences.showsDesktopCard
+        initialSnapshot = dependencies.initialSnapshot
         reduceMotion = dependencies.reduceMotion
     }
 
@@ -132,19 +145,36 @@ final class AppCoordinator {
         let api = APIClient()
         let auth = AuthManager(api: api)
         let snapshotStore = UserDefaultsSnapshotStore(userDefaults: .standard)
+        let loadedSnapshotState: PersistedSnapshotState?
+        do {
+            loadedSnapshotState = try snapshotStore.load()
+        } catch {
+            loadedSnapshotState = nil
+        }
+        let initialSnapshot = loadedSnapshotState?.cachedSnapshot
         let balanceService = BalanceService(api: api, auth: auth, snapshotStore: snapshotStore)
         let bridge = CoordinatorBridge()
         let scheduler = RefreshScheduler(
             interval: preferences.refreshInterval,
             refresh: {
-                let result = try await balanceService.refresh()
-                await MainActor.run { bridge.deliver(result) }
-                return result
+                do {
+                    let result = try await balanceService.refresh()
+                    await MainActor.run { bridge.deliver(result) }
+                    return result
+                } catch {
+                    await MainActor.run { bridge.deliverFailure(error) }
+                    throw error
+                }
             }
         )
         let networkMonitor = NetworkMonitor { available in
-            guard available else { return }
-            Task { await scheduler.networkBecameAvailable() }
+            Task { @MainActor in
+                if available {
+                    bridge.deliverNetworkRecovery()
+                } else {
+                    bridge.deliverNetworkUnavailable()
+                }
+            }
         }
         let desktopCard = DesktopCardController(preferencesStore: preferencesStore)
         let statusBar = StatusBarController(commands: StatusBarCommands(
@@ -178,6 +208,7 @@ final class AppCoordinator {
             settingsWindow: settingsWindow,
             openLogin: { loginWindow.present() },
             initialPreferences: preferences,
+            initialSnapshot: initialSnapshot,
             reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         ))
         bridge.coordinator = self
@@ -190,7 +221,12 @@ final class AppCoordinator {
             isAuthenticated = try await authentication.restoreSession()
         } catch {
             AppLogger.auth.error("Session restore failed: \(String(describing: error), privacy: .public)")
-            isAuthenticated = false
+            if Self.isAuthenticationFailure(error) {
+                isAuthenticated = false
+            } else {
+                isAuthenticated = true
+                presentCachedSnapshot(connection: Self.connectionState(for: error))
+            }
         }
 
         guard isAuthenticated else {
@@ -220,6 +256,7 @@ final class AppCoordinator {
 
     func handleRefreshFailure(_ error: Error) {
         AppLogger.refresh.error("Refresh failed: \(String(describing: error), privacy: .public)")
+        presentCachedSnapshot(connection: Self.connectionState(for: error))
     }
 
     func refreshNow() {
@@ -231,7 +268,11 @@ final class AppCoordinator {
     }
 
     func toggleDesktopCard() {
-        preferenceDesktopCardChanged(!showsDesktopCard)
+        let previous = showsDesktopCard
+        let next = !previous
+        if settingsWindow.setShowsDesktopCard(next), showsDesktopCard == previous {
+            preferenceDesktopCardChanged(next)
+        }
     }
 
     func preferenceRefreshIntervalChanged(_ seconds: TimeInterval) {
@@ -245,9 +286,14 @@ final class AppCoordinator {
     func preferenceDesktopCardChanged(_ visible: Bool) {
         showsDesktopCard = visible
         desktopCard.setVisible(visible && isAuthenticated)
+        statusBar.setDesktopCardVisible(visible)
     }
 
     func logout() async {
+        isAuthenticated = false
+        started = false
+        currentSnapshot = nil
+        desktopCard.setVisible(false)
         await scheduler.stop()
         networkMonitor.stop()
         do {
@@ -260,9 +306,6 @@ final class AppCoordinator {
         } catch {
             AppLogger.refresh.error("Snapshot baseline clear failed: \(String(describing: error), privacy: .public)")
         }
-        isAuthenticated = false
-        currentSnapshot = nil
-        desktopCard.setVisible(false)
         openLoginAction()
     }
 
@@ -276,9 +319,15 @@ final class AppCoordinator {
         Task { await scheduler.networkBecameAvailable() }
     }
 
-    func stopForTermination() {
+    func networkBecameUnavailable() {
+        guard isAuthenticated else { return }
+        presentCachedSnapshot(connection: .offline)
+        Task { await scheduler.networkBecameUnavailable() }
+    }
+
+    func stopForTermination() async {
         networkMonitor.stop()
-        Task { await scheduler.stop() }
+        await scheduler.stop()
     }
 
     fileprivate func loginSucceeded() {
@@ -287,6 +336,36 @@ final class AppCoordinator {
         desktopCard.setVisible(showsDesktopCard)
         networkMonitor.start()
         Task { await scheduler.start() }
+    }
+
+    private func presentCachedSnapshot(connection: ConnectionState) {
+        guard let snapshot = currentSnapshot ?? initialSnapshot else { return }
+        desktopCard.present(snapshot: snapshot, connection: connection)
+        statusBar.present(snapshot: snapshot, connection: connection, showsDesktopCard: showsDesktopCard)
+    }
+
+    private static func isAuthenticationFailure(_ error: Error) -> Bool {
+        guard let appError = error as? AppError else { return false }
+        switch appError {
+        case .loginChallenge, .unauthorized:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func connectionState(for error: Error) -> ConnectionState {
+        guard let appError = error as? AppError else { return .invalidData }
+        switch appError {
+        case .transport:
+            return .offline
+        case .rateLimited(let deadline):
+            return .rateLimited(until: deadline)
+        case .loginChallenge, .unauthorized:
+            return .loginRequired
+        case .invalidResponse, .invalidURL, .apiEnvelope, .serverStatus, .keychainStatus:
+            return .invalidData
+        }
     }
 }
 

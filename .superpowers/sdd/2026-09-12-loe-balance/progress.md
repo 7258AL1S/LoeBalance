@@ -113,3 +113,5 @@ Task 10: complete (base 3cea1e9; login/settings/launch-at-login source, focused 
 Task 10: fix round 1/5 (3 addressed, 0 open — concurrent submit guard, candidate-first settings transactions, visible UI rollback/error handling; build/harness/diff clean; XCTest not rerun)
 Task 11: implementation in progress (base de15704; Luna; one implementation pass; TDD plus warnings-as-errors real-source harness required; Terra disabled)
 Task 11: complete (swift build passed; bounded static harness passed once; git diff --check passed; XCTest single attempt blocked by exact environment error `sandbox-exec: sandbox_apply: Operation not permitted`; full-source harness not retried after actor-access diagnostics; live AppKit validation remains)
+Task 11: fix round 1/1 in progress (6 review findings; base ae6a3e3; Luna only; no XCTest or full-source swiftc harness; one bounded harness run)
+Task 11: fix round 1/1 complete (6 addressed; `swift build` passed; bounded static harness passed; `git diff --check` passed; no XCTest or full-source swiftc; commit follows)

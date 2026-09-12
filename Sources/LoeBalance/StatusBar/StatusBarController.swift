@@ -12,6 +12,7 @@ struct StatusBarCommands {
 protocol StatusBarPresenting: AnyObject {
     func present(snapshot: BalanceSnapshot, connection: ConnectionState, showsDesktopCard: Bool)
     func play(events: [BalanceAnimationEvent], reduceMotion: Bool)
+    func setDesktopCardVisible(_ visible: Bool)
 }
 
 @MainActor
@@ -78,6 +79,10 @@ final class StatusBarController: NSObject, StatusBarPresenting {
             reduceMotion: reduceMotion
         )
         contentView.damageStreamView.play(plans: plans, anchor: contentView.damageAnchor())
+    }
+
+    func setDesktopCardVisible(_ visible: Bool) {
+        desktopCardItem.title = visible ? "Hide Desktop Card" : "Show Desktop Card"
     }
 
     @objc func refreshNow(_ sender: Any?) {

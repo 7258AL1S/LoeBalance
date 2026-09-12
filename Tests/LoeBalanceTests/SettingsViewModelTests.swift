@@ -297,6 +297,7 @@ private actor SettingsScheduler: RefreshScheduling {
     func stop() {}
     func updateInterval(_ seconds: TimeInterval) { lastInterval = seconds }
     func refreshNow() async {}
+    func networkBecameUnavailable() {}
     func networkBecameAvailable() async {}
     func systemDidWake() async {}
 }

@@ -56,6 +56,20 @@ final class AppCoordinatorTests: XCTestCase {
         XCTAssertEqual(status.presentedSnapshots.count, 1)
     }
 
+    func testFailurePresentsCachedSnapshotWithMappedConnectionAndDoesNotAnimate() {
+        let card = CoordinatorCardSpy()
+        let status = CoordinatorStatusSpy()
+        let coordinator = makeCoordinator(card: card, status: status)
+        coordinator.handleRefreshResult(RefreshResult(snapshot: .fixture, events: [], connectionState: .online))
+
+        coordinator.handleRefreshFailure(AppError.rateLimited(retryAfter: .fixtureNow))
+
+        XCTAssertEqual(card.presentedConnections, [.online, .rateLimited(until: .fixtureNow)])
+        XCTAssertEqual(status.presentedConnections, [.online, .rateLimited(until: .fixtureNow)])
+        XCTAssertEqual(card.calls, [.present, .present])
+        XCTAssertEqual(status.calls, [.present, .present])
+    }
+
     func testPreferencesPropagateToSchedulerShakeAndCard() async {
         let scheduler = CoordinatorTestScheduler()
         let coordinator = makeCoordinator(scheduler: scheduler)
@@ -68,6 +82,59 @@ final class AppCoordinatorTests: XCTestCase {
         XCTAssertEqual(schedulerState.intervals, [90])
         XCTAssertEqual(coordinator.shakeStrength, .strong)
         XCTAssertEqual(coordinator.showsDesktopCard, false)
+    }
+
+    func testNetworkUnavailablePausesSchedulerAndPresentsOfflineSnapshot() async {
+        let scheduler = CoordinatorTestScheduler()
+        let card = CoordinatorCardSpy()
+        let status = CoordinatorStatusSpy()
+        let coordinator = makeCoordinator(scheduler: scheduler, card: card, status: status)
+        coordinator.handleRefreshResult(RefreshResult(snapshot: .fixture, events: [], connectionState: .online))
+
+        coordinator.networkBecameUnavailable()
+        await Task.yield()
+
+        let state = await scheduler.state()
+        XCTAssertEqual(state.unavailable, 1)
+        XCTAssertEqual(card.presentedConnections.last, .offline)
+        XCTAssertEqual(status.presentedConnections.last, .offline)
+    }
+
+    func testMenuToggleUsesSettingsTransactionBeforeUpdatingCoordinatorState() {
+        let settings = CoordinatorSettingsSpy(result: true)
+        let card = CoordinatorCardSpy()
+        let status = CoordinatorStatusSpy()
+        let coordinator = makeCoordinator(card: card, status: status, settings: settings)
+
+        coordinator.toggleDesktopCard()
+
+        XCTAssertEqual(settings.values, [false])
+        XCTAssertFalse(coordinator.showsDesktopCard)
+        XCTAssertEqual(status.visibility, [false])
+    }
+
+    func testTransientRestoreFailureKeepsCachedSnapshotAndStartsRetryingSession() async {
+        let auth = CoordinatorTestAuth(error: .transport(URLError(.notConnectedToInternet)))
+        let scheduler = CoordinatorTestScheduler()
+        let card = CoordinatorCardSpy()
+        let status = CoordinatorStatusSpy()
+        let login = CoordinatorLoginSpy()
+        let coordinator = makeCoordinator(
+            auth: auth,
+            scheduler: scheduler,
+            card: card,
+            status: status,
+            login: login,
+            initialSnapshot: .fixture
+        )
+
+        await coordinator.start()
+
+        let state = await scheduler.state()
+        XCTAssertEqual(state.start, 1)
+        XCTAssertEqual(login.openCount, 0)
+        XCTAssertEqual(card.presentedConnections, [.offline])
+        XCTAssertEqual(status.presentedConnections, [.offline])
     }
 
     func testLogoutStopsClearsHidesAndOpensLogin() async {
@@ -109,7 +176,9 @@ final class AppCoordinatorTests: XCTestCase {
         scheduler: CoordinatorTestScheduler = CoordinatorTestScheduler(),
         card: CoordinatorCardSpy = CoordinatorCardSpy(),
         status: CoordinatorStatusSpy = CoordinatorStatusSpy(),
-        login: CoordinatorLoginSpy = CoordinatorLoginSpy()
+        login: CoordinatorLoginSpy = CoordinatorLoginSpy(),
+        settings: CoordinatorSettingsSpy = CoordinatorSettingsSpy(),
+        initialSnapshot: BalanceSnapshot? = nil
     ) -> AppCoordinator {
         AppCoordinator(dependencies: .init(
             authentication: auth,
@@ -118,9 +187,10 @@ final class AppCoordinatorTests: XCTestCase {
             networkMonitor: CoordinatorNetworkSpy(),
             desktopCard: card,
             statusBar: status,
-            settingsWindow: CoordinatorSettingsSpy(),
+            settingsWindow: settings,
             openLogin: { login.open() },
             initialPreferences: AppPreferences(),
+            initialSnapshot: initialSnapshot,
             reduceMotion: true
         ))
     }
@@ -132,13 +202,18 @@ private extension BalanceSnapshot {
 
 private actor CoordinatorTestAuth: CoordinatorAuthenticating {
     let restored: Bool
+    let error: AppError?
     private(set) var restoreCount = 0
     private(set) var logoutCount = 0
 
-    init(restored: Bool) { self.restored = restored }
+    init(restored: Bool = true, error: AppError? = nil) {
+        self.restored = restored
+        self.error = error
+    }
 
     func restoreSession() async throws -> Bool {
         restoreCount += 1
+        if let error { throw error }
         return restored
     }
 
@@ -162,16 +237,18 @@ private actor CoordinatorTestScheduler: RefreshScheduling {
     private(set) var updatedIntervals: [TimeInterval] = []
     private(set) var wakeCount = 0
     private(set) var networkRecoveryCount = 0
+    private(set) var networkUnavailableCount = 0
 
     func start() async { startCount += 1 }
     func stop() { stopCount += 1 }
     func updateInterval(_ seconds: TimeInterval) { updatedIntervals.append(seconds) }
     func refreshNow() async {}
+    func networkBecameUnavailable() { networkUnavailableCount += 1 }
     func networkBecameAvailable() async { networkRecoveryCount += 1 }
     func systemDidWake() async { wakeCount += 1 }
 
-    func state() -> (start: Int, stop: Int, intervals: [TimeInterval], wake: Int, recovery: Int) {
-        (startCount, stopCount, updatedIntervals, wakeCount, networkRecoveryCount)
+    func state() -> (start: Int, stop: Int, intervals: [TimeInterval], wake: Int, recovery: Int, unavailable: Int) {
+        (startCount, stopCount, updatedIntervals, wakeCount, networkRecoveryCount, networkUnavailableCount)
     }
 }
 
@@ -182,9 +259,10 @@ private final class CoordinatorCardSpy: DesktopCardPresenting {
     var calls: [Call] = []
     var order: [Order] = []
     var presentedSnapshots: [BalanceSnapshot] = []
+    var presentedConnections: [ConnectionState] = []
     var visibility: [Bool] = []
 
-    func present(snapshot: BalanceSnapshot, connection: ConnectionState) { calls.append(.present); presentedSnapshots.append(snapshot); order.append(.cardPresent) }
+    func present(snapshot: BalanceSnapshot, connection: ConnectionState) { calls.append(.present); presentedSnapshots.append(snapshot); presentedConnections.append(connection); order.append(.cardPresent) }
     func play(events: [BalanceAnimationEvent], shake: ShakeStrength, reduceMotion: Bool) { calls.append(.play); order.append(.cardPlay) }
     func setVisible(_ visible: Bool) { visibility.append(visible) }
 }
@@ -194,10 +272,13 @@ private final class CoordinatorStatusSpy: StatusBarPresenting {
     enum Call: Equatable { case present, play }
     var calls: [Call] = []
     var presentedSnapshots: [BalanceSnapshot] = []
+    var presentedConnections: [ConnectionState] = []
+    var visibility: [Bool] = []
     var onPresent: (() -> Void)?
 
-    func present(snapshot: BalanceSnapshot, connection: ConnectionState, showsDesktopCard: Bool) { calls.append(.present); presentedSnapshots.append(snapshot); onPresent?() }
+    func present(snapshot: BalanceSnapshot, connection: ConnectionState, showsDesktopCard: Bool) { calls.append(.present); presentedSnapshots.append(snapshot); presentedConnections.append(connection); onPresent?() }
     func play(events: [BalanceAnimationEvent], reduceMotion: Bool) { calls.append(.play) }
+    func setDesktopCardVisible(_ visible: Bool) { visibility.append(visible) }
 }
 
 @MainActor
@@ -208,7 +289,15 @@ private final class CoordinatorLoginSpy {
 
 @MainActor
 private final class CoordinatorSettingsSpy: SettingsWindowPresenting {
+    var result: Bool
+    var values: [Bool] = []
+
+    init(result: Bool = true) { self.result = result }
     func present() {}
+    func setShowsDesktopCard(_ value: Bool) -> Bool {
+        values.append(value)
+        return result
+    }
 }
 
 private final class CoordinatorNetworkSpy: NetworkMonitoring {

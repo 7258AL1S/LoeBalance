@@ -150,19 +150,21 @@ final class SettingsViewModel: ObservableObject {
         onShakeStrengthChanged(value)
     }
 
-    func setShowsDesktopCard(_ value: Bool) {
+    @discardableResult
+    func setShowsDesktopCard(_ value: Bool) -> Bool {
         var candidate = preferences
         candidate.showsDesktopCard = value
         do {
             try preferencesStore.save(candidate)
         } catch {
             errorMessage = "Unable to save settings."
-            return
+            return false
         }
         preferences = candidate
         showsDesktopCard = value
         errorMessage = nil
         onShowsDesktopCardChanged(value)
+        return true
     }
 
     func setLaunchAtLogin(_ value: Bool) throws {

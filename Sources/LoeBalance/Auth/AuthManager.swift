@@ -126,7 +126,7 @@ actor AuthManager {
             do {
                 refreshed = try await api.refresh(refreshToken: refreshToken)
             } catch {
-                try self.failRefresh(forGeneration: generation)
+                try self.failRefresh(error: error, forGeneration: generation)
             }
             return try self.acceptRefresh(
                 refreshed,
@@ -182,12 +182,25 @@ actor AuthManager {
         return verified
     }
 
-    private func failRefresh(forGeneration generation: Int) throws -> Never {
+    private func failRefresh(error: Error, forGeneration generation: Int) throws -> Never {
         guard generation == authenticationGeneration else {
             throw CancellationError()
         }
+        guard Self.isAuthenticationInvalid(error) else {
+            throw error
+        }
         try invalidateSession()
         throw AppError.loginRequired
+    }
+
+    private static func isAuthenticationInvalid(_ error: Error) -> Bool {
+        guard let appError = error as? AppError else { return false }
+        switch appError {
+        case .unauthorized, .loginChallenge:
+            return true
+        default:
+            return false
+        }
     }
 
     private func replaceActiveSession(_ session: AuthSession) {
