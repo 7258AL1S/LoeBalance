@@ -12,6 +12,9 @@ Implemented and compiled on Windows (.NET 8):
 - `%LOCALAPPDATA%\LoeBalance` settings and snapshot stores with atomic writes.
 - Network availability monitor, power-resume monitor, and per-user startup registration.
 - NotifyIcon tray presenter: connection icon, balance tooltip, right-click menu.
+- Taskbar balance readout docked against the notification area (topmost overlay window,
+  because Windows 11 has no deskband/taskbar-text API). Static balance only, toggled from the
+  tray menu or settings.
 - Desktop card window: borderless, non-activating, no taskbar button, never topmost,
   desktop-layer placement, work-area clamping, and saved position memory.
 - Damage stream canvas with single-track launches, red debits, green credits, card-only shake.

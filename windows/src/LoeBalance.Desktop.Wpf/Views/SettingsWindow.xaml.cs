@@ -30,6 +30,8 @@ public partial class SettingsWindow : Window
 
     internal void SetShowsDesktopCard(bool value) => DesktopCardCheck.IsChecked = value;
 
+    internal void SetShowsTaskbarBalance(bool value) => TaskbarBalanceCheck.IsChecked = value;
+
     private async void OnShakeChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressEvents) return;
@@ -53,6 +55,12 @@ public partial class SettingsWindow : Window
     {
         if (_suppressEvents) return;
         await _viewModel.SetShowsDesktopCardAsync(DesktopCardCheck.IsChecked == true);
+    }
+
+    private async void OnTaskbarBalanceToggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        await _viewModel.SetShowsTaskbarBalanceAsync(TaskbarBalanceCheck.IsChecked == true);
     }
 
     private async void OnLaunchAtLoginToggled(object sender, RoutedEventArgs e)
@@ -81,6 +89,7 @@ public partial class SettingsWindow : Window
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             DesktopCardCheck.IsChecked = _viewModel.ShowsDesktopCard;
+            TaskbarBalanceCheck.IsChecked = _viewModel.ShowsTaskbarBalance;
             LaunchAtLoginCheck.IsChecked = _viewModel.LaunchAtLogin;
             ErrorText.Text = _viewModel.ErrorMessage;
         }

@@ -313,3 +313,44 @@ Real-machine observations from launching the published `win-x64` build:
 - Sleep/wake refresh, network disconnect/reconnect refresh, and live `Retry-After` behavior.
 - Tray tooltip truncation and context-menu behavior at high DPI.
 - Installer, Authenticode signing, and SmartScreen validation.
+
+## 13. Taskbar Balance Readout (2026-09-13)
+
+The Windows taskbar has no supported API for custom text: deskbands are gone and Windows 11
+removed the toolbars that older shell extensions used. The readout is therefore implemented
+as a small topmost, non-activating overlay window docked against the notification area, which
+is the same technique desktop taskbar widgets use.
+
+### 13.1 Behaviour
+
+- Docked just left of `TrayNotifyWnd` (tray + clock) on horizontal taskbars, and above the
+  tray block on vertical Windows 10 taskbars. The arithmetic lives in
+  `LoeBalance.Core.Presentation.TaskbarBalanceGeometry` and is unit tested.
+- Follows the taskbar every second, so resolution changes, taskbar docking changes, taskbar
+  auto-hide and Explorer restarts are picked up. When the shell reports a full-screen app,
+  presentation mode, the lock screen or an absent session, the readout hides itself.
+- Topmost, `WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`, no taskbar button, never activates on click.
+- Left-clicking the readout opens the same context menu as the tray icon.
+- Shows a static balance plus the connection dot. It never shakes and never carries the
+  floating debit/credit numbers; those stay on the desktop card.
+- Toggleable from the tray menu ("Show/Hide Taskbar Balance") and from
+  Settings → "Show balance on the taskbar". Persisted as `showsTaskbarBalance` (default on).
+
+### 13.2 Verification performed
+
+| Item | Evidence |
+|---|---|
+| Core geometry | 6 new unit tests (bottom/top/vertical taskbars, clamping, edge detection, fallback tray rect) |
+| Build and suites | Release build 0 warnings/0 errors; 74 core tests and 18 platform tests pass |
+| Real machine (Windows 11 26200, 2560x1600 @125%) | Readout window created at 66x24 DIP just left of the tray (8 DIP gap), ex-style `0x08080088` = TOPMOST + TOOLWINDOW + NOACTIVATE + LAYERED, no app window |
+| Rendering | Screen capture of the taskbar strip shows the readout drawn above the taskbar with the live balance |
+
+A defect found during this work: the readout window never appeared because the placement ran
+before the HWND existed and returned early. Fixed by creating the handle up front
+(`EnsureHandle`) before solving the position, the same fix applied earlier to the desktop card.
+
+### 13.3 Still requires manual verification
+
+- Clicking the readout to open the context menu.
+- Toggling the readout from both the tray menu and the settings window.
+- Behaviour with a full-screen game/video and with taskbar auto-hide enabled.

@@ -9,6 +9,7 @@ using LoeBalance.Core.Refresh;
 using LoeBalance.Desktop.Wpf.Presentation;
 using LoeBalance.Desktop.Wpf.ViewModels;
 using LoeBalance.Desktop.Wpf.Views;
+using LoeBalance.Desktop.Wpf.Interop;
 using LoeBalance.Platform.Windows;
 
 namespace LoeBalance.Desktop.Wpf;
@@ -31,6 +32,7 @@ internal sealed class AppCoordinator : IDisposable
     private readonly RefreshScheduler _scheduler;
     private readonly TrayPresenter _tray;
     private readonly DesktopCardWindow _card;
+    private readonly TaskbarBalanceWindow _taskbarReadout;
     private readonly DamageAnimationPlanner _planner = new();
     private readonly EventHandler<bool> _networkAvailabilityHandler;
     private readonly EventHandler _powerResumeHandler;
@@ -53,10 +55,12 @@ internal sealed class AppCoordinator : IDisposable
         _tray = new TrayPresenter(new TrayCommands(
             RefreshNow: () => _ = _scheduler.RefreshNowAsync(),
             ToggleDesktopCard: ToggleDesktopCard,
+            ToggleTaskbarBalance: ToggleTaskbarBalance,
             OpenSettings: OpenSettings,
             Logout: () => _ = LogoutAsync(),
             Quit: Quit));
         _card = new DesktopCardWindow(null, SaveDesktopCardFrame);
+        _taskbarReadout = new TaskbarBalanceWindow(OpenTrayMenuAtCursor);
 
         // Network recovery and system wake must trigger an immediate refresh, and both
         // monitors raise their events on background threads, so every handler is marshalled
@@ -102,6 +106,7 @@ internal sealed class AppCoordinator : IDisposable
         if (!_authenticated)
         {
             _card.SetVisible(false);
+            _taskbarReadout.SetVisible(false);
             _network.Start();
             ShowLogin();
             return;
@@ -110,6 +115,7 @@ internal sealed class AppCoordinator : IDisposable
         _network.Start();
         _power.Start();
         _card.SetVisible(_preferences.ShowsDesktopCard);
+        _taskbarReadout.SetVisible(_preferences.ShowsTaskbarBalance);
         await _scheduler.StartAsync();
     }
 
@@ -126,6 +132,7 @@ internal sealed class AppCoordinator : IDisposable
         _settingsWindow = null;
         _loginWindow?.Close();
         _loginWindow = null;
+        _taskbarReadout.Dispose();
         _card.Close();
         _tray.Dispose();
 
@@ -154,6 +161,8 @@ internal sealed class AppCoordinator : IDisposable
         _card.SetVisible(true);
         _card.Present(snapshot, new ConnectionState.Online());
         _tray.Present(snapshot, new ConnectionState.Online(), _preferences.ShowsDesktopCard);
+        _taskbarReadout.SetVisible(true);
+        _taskbarReadout.Present(snapshot, new ConnectionState.Online());
 
         var burst = new BalanceAnimationEvent[]
         {
@@ -203,6 +212,7 @@ internal sealed class AppCoordinator : IDisposable
 
         _card.Present(result.Snapshot, result.ConnectionState);
         _tray.Present(result.Snapshot, result.ConnectionState, _preferences.ShowsDesktopCard);
+        _taskbarReadout.Present(result.Snapshot, result.ConnectionState);
 
         // Only the desktop card animates. The tray reports state through icon and tooltip;
         // it never carries floating debit numbers.
@@ -222,6 +232,7 @@ internal sealed class AppCoordinator : IDisposable
 
         _card.Present(snapshot, connection);
         _tray.Present(snapshot, connection, _preferences.ShowsDesktopCard);
+        _taskbarReadout.Present(snapshot, connection);
     }
 
     private void ToggleDesktopCard()
@@ -233,6 +244,25 @@ internal sealed class AppCoordinator : IDisposable
         _card.SetVisible(next && _authenticated);
         _tray.SetDesktopCardVisible(next);
         _settingsWindow?.SetShowsDesktopCard(next);
+    }
+
+    private void ToggleTaskbarBalance()
+    {
+        var next = !_preferences.ShowsTaskbarBalance;
+        _preferences = _preferences with { ShowsTaskbarBalance = next };
+        _ = PersistPreferencesAsync(_preferences);
+
+        _taskbarReadout.SetVisible(next && _authenticated);
+        _tray.SetTaskbarBalanceVisible(next);
+        _settingsWindow?.SetShowsTaskbarBalance(next);
+    }
+
+    private void OpenTrayMenuAtCursor()
+    {
+        if (NativeMethods.GetCursorPos(out var point))
+        {
+            _tray.ShowMenuAt(new System.Drawing.Point(point.X, point.Y));
+        }
     }
 
     private void OpenSettings() => _ = OpenSettingsAsync();
@@ -259,6 +289,12 @@ internal sealed class AppCoordinator : IDisposable
                 _preferences = _preferences with { ShowsDesktopCard = value };
                 _card.SetVisible(value && _authenticated);
                 _tray.SetDesktopCardVisible(value);
+            },
+            onShowsTaskbarBalanceChanged: value =>
+            {
+                _preferences = _preferences with { ShowsTaskbarBalance = value };
+                _taskbarReadout.SetVisible(value && _authenticated);
+                _tray.SetTaskbarBalanceVisible(value);
             },
             logout: LogoutAsync);
         return new SettingsWindow(viewModel);
@@ -301,6 +337,7 @@ internal sealed class AppCoordinator : IDisposable
         _network.Start();
         _power.Start();
         _card.SetVisible(_preferences.ShowsDesktopCard);
+        _taskbarReadout.SetVisible(_preferences.ShowsTaskbarBalance);
         _ = _scheduler.StartAsync();
     }
 
@@ -309,6 +346,7 @@ internal sealed class AppCoordinator : IDisposable
         _authenticated = false;
         _currentSnapshot = null;
         _card.SetVisible(false);
+        _taskbarReadout.SetVisible(false);
         await _scheduler.StopAsync();
         _network.Stop();
         _power.Stop();
@@ -347,6 +385,8 @@ internal sealed class AppCoordinator : IDisposable
         _preferences = await _settingsStore.LoadAsync() ?? AppPreferences.Empty;
         _initialSnapshot = (await _snapshotStore.LoadAsync())?.CachedSnapshot;
         _card.SetSavedFrame(_preferences.DesktopCardFrame);
+        _tray.SetDesktopCardVisible(_preferences.ShowsDesktopCard);
+        _tray.SetTaskbarBalanceVisible(_preferences.ShowsTaskbarBalance);
         _scheduler.UpdateInterval(_preferences.ClampedRefreshIntervalSeconds);
     }
 

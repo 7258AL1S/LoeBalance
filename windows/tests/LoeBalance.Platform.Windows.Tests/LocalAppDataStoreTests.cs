@@ -55,7 +55,10 @@ public sealed class LocalAppDataStoreTests : IDisposable
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(store.SettingsPath));
         var names = document.RootElement.EnumerateObject().Select(property => property.Name).OrderBy(name => name).ToArray();
         Assert.Equal(
-            ["desktopCardFrame", "launchAtLogin", "refreshIntervalSeconds", "shakeStrength", "showsDesktopCard"],
+            [
+                "desktopCardFrame", "launchAtLogin", "refreshIntervalSeconds", "shakeStrength",
+                "showsDesktopCard", "showsTaskbarBalance"
+            ],
             names);
     }
 

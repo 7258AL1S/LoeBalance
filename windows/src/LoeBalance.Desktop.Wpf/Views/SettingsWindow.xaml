@@ -14,6 +14,8 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -49,21 +51,27 @@
                   Click="OnDesktopCardToggled"
                   Content="Show Desktop Card" />
 
-        <CheckBox x:Name="LaunchAtLoginCheck"
+        <CheckBox x:Name="TaskbarBalanceCheck"
                   Grid.Row="4"
+                  Margin="0,8,0,0"
+                  Click="OnTaskbarBalanceToggled"
+                  Content="Show balance on the taskbar" />
+
+        <CheckBox x:Name="LaunchAtLoginCheck"
+                  Grid.Row="5"
                   Margin="0,8,0,0"
                   Click="OnLaunchAtLoginToggled"
                   Content="Launch at Login" />
 
         <TextBlock x:Name="ErrorText"
-                   Grid.Row="5"
+                   Grid.Row="6"
                    Margin="0,14,0,0"
                    FontSize="12"
                    Foreground="#C62828"
                    TextWrapping="Wrap" />
 
         <Button x:Name="LogOutButton"
-                Grid.Row="6"
+                Grid.Row="8"
                 HorizontalAlignment="Right"
                 Padding="12,4"
                 Click="OnLogOutClick"

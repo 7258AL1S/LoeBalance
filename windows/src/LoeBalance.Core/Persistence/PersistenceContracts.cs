@@ -39,7 +39,8 @@ public sealed record AppPreferences(
     ShakeStrength ShakeStrength = ShakeStrength.Weak,
     bool ShowsDesktopCard = true,
     bool LaunchAtLogin = false,
-    DesktopCardFrame? DesktopCardFrame = null)
+    DesktopCardFrame? DesktopCardFrame = null,
+    bool ShowsTaskbarBalance = true)
 {
     [JsonIgnore]
     public double ClampedRefreshIntervalSeconds => Math.Clamp(RefreshIntervalSeconds, 1, 3600);

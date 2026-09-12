@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Windows.Forms;
 using LoeBalance.Core.Models;
+using LoeBalance.Desktop.Wpf.Interop;
 using LoeBalance.Platform.Windows;
 
 namespace LoeBalance.Desktop.Wpf.Presentation;
@@ -9,6 +10,7 @@ namespace LoeBalance.Desktop.Wpf.Presentation;
 internal sealed record TrayCommands(
     Action RefreshNow,
     Action ToggleDesktopCard,
+    Action ToggleTaskbarBalance,
     Action OpenSettings,
     Action Logout,
     Action Quit);
@@ -31,6 +33,7 @@ internal sealed class TrayPresenter : ITrayPresenter
     private readonly ToolStripMenuItem _connectionItem;
     private readonly ToolStripMenuItem _refreshItem;
     private readonly ToolStripMenuItem _desktopCardItem;
+    private readonly ToolStripMenuItem _taskbarBalanceItem;
     private readonly ToolStripMenuItem _settingsItem;
     private readonly ToolStripMenuItem _logoutItem;
     private readonly ToolStripMenuItem _quitItem;
@@ -44,6 +47,7 @@ internal sealed class TrayPresenter : ITrayPresenter
         _connectionItem = new ToolStripMenuItem("Online · Updated --") { Enabled = false };
         _refreshItem = new ToolStripMenuItem("Refresh Now", null, (_, _) => commands.RefreshNow());
         _desktopCardItem = new ToolStripMenuItem("Show Desktop Card", null, (_, _) => commands.ToggleDesktopCard());
+        _taskbarBalanceItem = new ToolStripMenuItem("Hide Taskbar Balance", null, (_, _) => commands.ToggleTaskbarBalance());
         _settingsItem = new ToolStripMenuItem("Settings…", null, (_, _) => commands.OpenSettings());
         _logoutItem = new ToolStripMenuItem("Log Out", null, (_, _) => commands.Logout());
         _quitItem = new ToolStripMenuItem("Quit LoeBalance", null, (_, _) => commands.Quit());
@@ -56,6 +60,7 @@ internal sealed class TrayPresenter : ITrayPresenter
             new ToolStripSeparator(),
             _refreshItem,
             _desktopCardItem,
+            _taskbarBalanceItem,
             _settingsItem,
             new ToolStripSeparator(),
             _logoutItem,
@@ -92,6 +97,17 @@ internal sealed class TrayPresenter : ITrayPresenter
     /// <summary>Sets the desktop-card toggle text without waiting for the next refresh.</summary>
     internal void SetDesktopCardVisible(bool visible)
         => _desktopCardItem.Text = visible ? "Hide Desktop Card" : "Show Desktop Card";
+
+    /// <summary>Sets the taskbar-balance toggle text without waiting for the next refresh.</summary>
+    internal void SetTaskbarBalanceVisible(bool visible)
+        => _taskbarBalanceItem.Text = visible ? "Hide Taskbar Balance" : "Show Taskbar Balance";
+
+    /// <summary>Opens the context menu at a screen position (used by the taskbar readout).</summary>
+    internal void ShowMenuAt(System.Drawing.Point screenPoint)
+    {
+        _menu.Show(screenPoint);
+        NativeMethods.SetForegroundWindow(_menu.Handle);
+    }
 
     public void ShowError(string message)
     {

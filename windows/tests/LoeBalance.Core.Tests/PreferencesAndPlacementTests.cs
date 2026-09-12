@@ -19,6 +19,20 @@ public sealed class PreferencesAndPlacementTests
     }
 
     [Fact]
+    public void TaskbarBalanceReadoutIsOnByDefaultAndRoundTrips()
+    {
+        Assert.True(AppPreferences.Empty.ShowsTaskbarBalance);
+        Assert.True(new AppPreferences(30).ShowsTaskbarBalance);
+
+        var preferences = AppPreferences.Empty with { ShowsTaskbarBalance = false };
+        var restored = JsonSerializer.Deserialize<AppPreferences>(
+            JsonSerializer.Serialize(preferences, PersistenceJson.Options),
+            PersistenceJson.Options);
+
+        Assert.False(restored!.ShowsTaskbarBalance);
+    }
+
+    [Fact]
     public void MissingFieldsFallBackToDefaults()
     {
         var restored = JsonSerializer.Deserialize<AppPreferences>("{}", PersistenceJson.Options);

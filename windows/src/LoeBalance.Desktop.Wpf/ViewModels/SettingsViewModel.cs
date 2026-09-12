@@ -32,6 +32,7 @@ public sealed class SettingsViewModel
         IStartupRegistration launchAtLogin,
         Action<ShakeStrength> onShakeStrengthChanged,
         Action<bool> onShowsDesktopCardChanged,
+        Action<bool> onShowsTaskbarBalanceChanged,
         Func<Task> logout)
     {
         _preferencesStore = preferencesStore;
@@ -40,12 +41,14 @@ public sealed class SettingsViewModel
         _preferences = AppPreferences.Empty;
         OnShakeStrengthChanged = onShakeStrengthChanged;
         OnShowsDesktopCardChanged = onShowsDesktopCardChanged;
+        OnShowsTaskbarBalanceChanged = onShowsTaskbarBalanceChanged;
         Logout = logout;
     }
 
     // Named `Shake` so the property does not shadow the ShakeStrength type inside this class.
     public ShakeStrength Shake { get; private set; } = ShakeStrength.Weak;
     public bool ShowsDesktopCard { get; private set; } = true;
+    public bool ShowsTaskbarBalance { get; private set; } = true;
     public bool LaunchAtLogin { get; private set; }
     public RefreshIntervalPreset RefreshPreset { get; private set; } = RefreshIntervalPreset.ThirtySeconds;
     public string CustomInterval { get; set; } = "30";
@@ -53,6 +56,7 @@ public sealed class SettingsViewModel
 
     internal Action<ShakeStrength> OnShakeStrengthChanged { get; }
     internal Action<bool> OnShowsDesktopCardChanged { get; }
+    internal Action<bool> OnShowsTaskbarBalanceChanged { get; }
     internal Func<Task> Logout { get; }
 
     public event EventHandler? StateChanged;
@@ -62,6 +66,7 @@ public sealed class SettingsViewModel
         _preferences = await _preferencesStore.LoadAsync() ?? AppPreferences.Empty;
         Shake = _preferences.ShakeStrength;
         ShowsDesktopCard = _preferences.ShowsDesktopCard;
+        ShowsTaskbarBalance = _preferences.ShowsTaskbarBalance;
         LaunchAtLogin = _launchAtLogin.IsEnabled;
         RefreshPreset = PresetFor(_preferences.ClampedRefreshIntervalSeconds);
         CustomInterval = _preferences.ClampedRefreshIntervalSeconds.ToString("0", CultureInfo.InvariantCulture);
@@ -138,6 +143,16 @@ public sealed class SettingsViewModel
 
         ShowsDesktopCard = value;
         OnShowsDesktopCardChanged(value);
+        RaiseStateChanged();
+    }
+
+    public async Task SetShowsTaskbarBalanceAsync(bool value)
+    {
+        var candidate = _preferences with { ShowsTaskbarBalance = value };
+        if (!await TrySaveAsync(candidate)) return;
+
+        ShowsTaskbarBalance = value;
+        OnShowsTaskbarBalanceChanged(value);
         RaiseStateChanged();
     }
 
