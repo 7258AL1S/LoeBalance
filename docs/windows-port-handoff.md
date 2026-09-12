@@ -354,3 +354,41 @@ before the HWND existed and returned early. Fixed by creating the handle up fron
 - Clicking the readout to open the context menu.
 - Toggling the readout from both the tray menu and the settings window.
 - Behaviour with a full-screen game/video and with taskbar auto-hide enabled.
+
+## 14. Installer and Release (2026-09-13)
+
+### 14.1 What was added
+
+- `windows/installer/LoeBalance.iss` — Inno Setup 6 script that produces a per-user installer
+  (no administrator rights) matching the layout already used in testing:
+  `%LOCALAPPDATA%\Programs\LoeBalance`, Start Menu entries, optional desktop icon, opt-in
+  startup entry, uninstaller, and a `PrepareToInstall` step that closes the running tray app
+  (the installer does not use `AppMutex` because that check cancels silent installs).
+- `windows/installer/LoeBalance.ico` plus `windows/tools/make-app-icon.ps1` so the icon is
+  reproducible from source.
+- `windows/tools/build-installers.ps1` — publishes both runtime identifiers, compiles the
+  installer for each one, and writes SHA-256 files.
+- Uninstall behaviour: interactive uninstall asks whether to delete settings, cached balance
+  and the stored credential; silent uninstall keeps them so automation does not destroy a
+  session. The startup entry written by the installer is removed automatically.
+
+### 14.2 Verification performed on Windows
+
+| Step | Result |
+|---|---|
+| `build-installers.ps1 -Version 0.1.0` | both installers compiled, SHA-256 written |
+| Silent install (`/VERYSILENT`) | exit 0, 249 files, `unins000.exe` present, Start Menu entries created |
+| Opt-in tasks | `desktopicon` created and removed cleanly; the startup task stays unchecked and writes no `Run` value |
+| Launch after install | app runs from the installed path, desktop card and taskbar readout visible |
+| Silent uninstall while the app was running | exit 0, app closed automatically, install directory and Start Menu entries removed, uninstall entry and `Run` value gone, settings and credential preserved |
+| Silent uninstall before the fix | app stayed running, so the executable was locked and files survived — this is why the uninstaller now closes the app first |
+
+### 14.3 Release
+
+Published on GitHub as a pre-release with two assets and their SHA-256 files:
+
+- `LoeBalance-Setup-0.1.0-win-x64.exe`
+- `LoeBalance-Setup-0.1.0-win-x86.exe`
+
+The binaries are not Authenticode signed, so SmartScreen warns on first run. Installer
+signing, an auto-update channel, and mixed-DPI verification remain open items.

@@ -52,4 +52,21 @@ LoeBalance.Desktop.Wpf.exe --preview-card
 powershell -File windows\tools\verify-desktop-card.ps1 -ProcessId <pid> -MoveToX 300 -MoveToY 200
 ```
 
+## Building the installer
+
+```powershell
+# Requires the .NET 8 SDK and Inno Setup 6
+#   winget install JRSoftware.InnoSetup --scope user
+powershell -File windows\tools\build-installers.ps1 -Version 0.1.0
+```
+
+`windows\tools\build-installers.ps1` publishes `win-x64`/`win-x86`, compiles
+`windows\installer\LoeBalance.iss` for each runtime identifier, and writes SHA-256 files next
+to the installers in `work\installer`. The installer is per user (no administrator rights):
+it installs into `%LOCALAPPDATA%\Programs\LoeBalance`, adds Start Menu entries, offers an
+optional desktop icon and an opt-in startup entry, closes a running instance before copying
+files, and records an uninstaller. Uninstalling interactively asks whether the settings,
+cached balance and the stored credential should be removed as well; silent uninstalls keep
+them.
+
 The Windows-specific acceptance list is in `docs/windows-port-handoff.md`.
