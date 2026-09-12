@@ -111,3 +111,5 @@ Task 9: complete (commit dbf745b; swift build and warnings-as-errors harness pas
 Task 9: final review clean (2026-09-12; Critical 0, Important 0; verification-hardening tests committed in 3cea1e9 and dbf745b; no further XCTest wait requested; Minor balance-width ceiling deferred to integration QA)
 Task 10: complete (base 3cea1e9; login/settings/launch-at-login source, focused tests, and warnings-as-errors harness implemented; XCTest unavailable, build/harness/diff clean)
 Task 10: fix round 1/5 (3 addressed, 0 open — concurrent submit guard, candidate-first settings transactions, visible UI rollback/error handling; build/harness/diff clean; XCTest not rerun)
+Task 11: implementation in progress (base de15704; Luna; one implementation pass; TDD plus warnings-as-errors real-source harness required; Terra disabled)
+Task 11: complete (swift build passed; bounded static harness passed once; git diff --check passed; XCTest single attempt blocked by exact environment error `sandbox-exec: sandbox_apply: Operation not permitted`; full-source harness not retried after actor-access diagnostics; live AppKit validation remains)

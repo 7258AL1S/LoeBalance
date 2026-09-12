@@ -12,8 +12,3 @@ enum AppError: Error, Equatable, Sendable {
     case keychainStatus(OSStatus)
     case loginChallenge
 }
-
-@main
-private enum LoeBalanceBootstrap {
-    static func main() {}
-}
