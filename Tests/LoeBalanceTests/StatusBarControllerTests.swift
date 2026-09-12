@@ -22,6 +22,8 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertEqual(view.bounds.size, StatusBarContentView.fixedSize)
         XCTAssertEqual(view.damageAreaWidth, 54)
         XCTAssertEqual(view.damageStreamView.frame.width, 54)
+        XCTAssertEqual(view.damageStreamView.intrinsicContentSize, NSSize(width: 54, height: 42))
+        XCTAssertEqual(DamageStreamView(frame: .zero).intrinsicContentSize, DamageStreamView.fixedSize)
         XCTAssertEqual(view.damageStreamView.frame.minX, view.balanceLabel.frame.maxX + 2, accuracy: 0.01)
         let damageMask = try! XCTUnwrap(view.damageStreamView.layer?.mask)
         XCTAssertEqual(damageMask.frame.minX, 0, accuracy: 0.01)
@@ -56,6 +58,10 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertEqual(controller.contentView.bounds.width, widthBefore)
         XCTAssertEqual(controller.statusItem.length, StatusBarContentView.fixedSize.width)
         XCTAssertEqual(controller.contentView.damageStreamView.layer?.sublayers?.count, 6)
+        for layer in controller.contentView.damageStreamView.layer?.sublayers ?? [] {
+            XCTAssertGreaterThanOrEqual(layer.frame.minX, 0)
+            XCTAssertLessThanOrEqual(layer.frame.maxX, controller.contentView.damageStreamView.bounds.width)
+        }
     }
 
     func testCommandsInvokeTheirClosures() {

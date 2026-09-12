@@ -11,6 +11,7 @@ final class StatusBarContentView: NSView {
     static let fixedDamageWidth: CGFloat = 54
     static let damageSpacing: CGFloat = 2
     static let fixedHeight: CGFloat = 22
+    static let damageStreamSize = NSSize(width: fixedDamageWidth, height: DamageStreamView.fixedSize.height)
     static let maximumBalanceText = "$1,000,000.00"
     static let balanceFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
     static let balanceWidth = ceil(
@@ -23,7 +24,7 @@ final class StatusBarContentView: NSView {
 
     let statusDot = NSView()
     let balanceLabel: NSTextField = FrameAlignedStatusLabel(labelWithString: "--")
-    let damageStreamView = DamageStreamView(frame: .zero)
+    let damageStreamView = DamageStreamView(frame: .zero, presentationSize: StatusBarContentView.damageStreamSize)
 
     var damageAreaWidth: CGFloat { Self.fixedDamageWidth }
 

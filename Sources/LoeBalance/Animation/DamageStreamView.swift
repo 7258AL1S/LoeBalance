@@ -23,26 +23,48 @@ private final class DamageAnimationCleanupDelegate: NSObject, CAAnimationDelegat
 final class DamageStreamView: NSView {
     static let fixedSize = NSSize(width: 92, height: 42)
 
+    private let presentationSize: NSSize
     private let currentTime: () -> CFTimeInterval
     private var cleanupDelegates: [ObjectIdentifier: DamageAnimationCleanupDelegate] = [:]
 
     override var intrinsicContentSize: NSSize {
-        Self.fixedSize
+        presentationSize
     }
 
     override init(frame frameRect: NSRect) {
+        presentationSize = Self.fixedSize
         currentTime = { CACurrentMediaTime() }
         super.init(frame: frameRect)
         configure()
     }
 
     init(frame frameRect: NSRect, currentTime: @escaping () -> CFTimeInterval) {
+        presentationSize = Self.fixedSize
+        self.currentTime = currentTime
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    init(frame frameRect: NSRect, presentationSize: NSSize) {
+        self.presentationSize = presentationSize
+        currentTime = { CACurrentMediaTime() }
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    init(
+        frame frameRect: NSRect,
+        presentationSize: NSSize,
+        currentTime: @escaping () -> CFTimeInterval
+    ) {
+        self.presentationSize = presentationSize
         self.currentTime = currentTime
         super.init(frame: frameRect)
         configure()
     }
 
     required init?(coder: NSCoder) {
+        presentationSize = Self.fixedSize
         currentTime = { CACurrentMediaTime() }
         super.init(coder: coder)
         configure()
@@ -79,7 +101,13 @@ final class DamageStreamView: NSView {
         textLayer.foregroundColor = color(for: plan).cgColor
         textLayer.string = Self.label(for: plan.event)
         textLayer.opacity = 0
-        textLayer.frame = CGRect(x: anchor.x - 46, y: anchor.y - 10, width: 92, height: 20)
+        let textWidth = bounds.width
+        textLayer.frame = CGRect(
+            x: bounds.midX - textWidth / 2,
+            y: anchor.y - 10,
+            width: textWidth,
+            height: 20
+        )
         return textLayer
     }
 
