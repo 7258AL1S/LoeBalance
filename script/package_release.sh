@@ -53,6 +53,7 @@ package_architecture() {
   local binary
   local archive="$OUTPUT_DIR/${APP_NAME}-macOS-$architecture.zip"
   local checksum="$OUTPUT_DIR/${APP_NAME}-macOS-$architecture.sha256"
+  local temporary_directory
   local temporary_archive
   local temporary_checksum
 
@@ -66,8 +67,9 @@ package_architecture() {
   write_info_plist "$app_contents/Info.plist"
   codesign --force --deep --sign - "$staging_path"
 
-  temporary_archive="$(mktemp "${TMPDIR:-/tmp}/$APP_NAME-$architecture.XXXXXX.zip")"
-  temporary_checksum="$(mktemp "${TMPDIR:-/tmp}/$APP_NAME-$architecture.XXXXXX.sha256")"
+  temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/$APP_NAME-$architecture.XXXXXX")"
+  temporary_archive="$temporary_directory/archive.zip"
+  temporary_checksum="$temporary_directory/checksum"
   ditto -c -k --sequesterRsrc --keepParent "$staging_path" "$temporary_archive"
   shasum -a 256 "$temporary_archive" | awk -v name="$(basename "$archive")" '{print $1 "  " name}' > "$temporary_checksum"
   install -m 644 "$temporary_archive" "$archive"
@@ -76,6 +78,7 @@ package_architecture() {
   codesign --verify --deep --strict "$staging_path"
   file "$app_macos/$APP_NAME"
   (cd "$OUTPUT_DIR" && shasum -a 256 -c "$(basename "$checksum")")
+  rm -rf "$temporary_directory"
   printf 'Created %s\n' "$archive"
 }
 
