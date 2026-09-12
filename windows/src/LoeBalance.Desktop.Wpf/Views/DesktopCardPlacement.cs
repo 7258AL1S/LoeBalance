@@ -1,63 +1,64 @@
 using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media;
 using LoeBalance.Core.Persistence;
 using LoeBalance.Desktop.Wpf.Interop;
 
 namespace LoeBalance.Desktop.Wpf.Views;
 
 /// <summary>
-/// Places the desktop card on the monitor that owns the saved position, clamps the position
-/// inside that monitor's work area so the card never leaves the screen after a display
-/// change, and keeps everything in device pixels to stay stable across mixed-DPI setups.
+/// Places the desktop card on the monitor that owns the saved position and clamps that
+/// position inside the monitor's work area, so the card never leaves the screen after a
+/// resolution or monitor change.
+///
+/// Everything is expressed in WPF device-independent units and assigned through
+/// <see cref="Window.Left"/>/<see cref="Window.Top"/> so WPF owns the per-monitor DPI
+/// conversion. Mixing raw SetWindowPos pixel placement with WPF's DIP model produced
+/// inconsistent positions at 150% scaling during real-machine testing, so the only native
+/// call left here is the z-order change that keeps the card on the desktop layer.
 /// </summary>
 internal sealed class DesktopCardPlacement
 {
-    private readonly double _cardWidthDip;
-    private readonly double _cardHeightDip;
+    private readonly double _cardWidth;
+    private readonly double _cardHeight;
 
-    internal DesktopCardPlacement(double cardWidthDip, double cardHeightDip)
+    internal DesktopCardPlacement(double cardWidth, double cardHeight)
     {
-        _cardWidthDip = cardWidthDip;
-        _cardHeightDip = cardHeightDip;
+        _cardWidth = cardWidth;
+        _cardHeight = cardHeight;
     }
 
-    /// <summary>Resolves the device-pixel frame to apply, using the saved frame when usable.</summary>
-    internal (DesktopCardFrame Frame, bool HasSavedPosition) Resolve(IntPtr windowHandle, DesktopCardFrame? saved)
+    /// <summary>Resolves the frame (in DIPs) to apply, using the saved frame when usable.</summary>
+    internal (DesktopCardFrame Frame, bool HasSavedPosition) Resolve(Window window, DesktopCardFrame? saved)
     {
-        var monitor = saved is null ? MonitorForWindow(windowHandle) : MonitorForFrame(saved);
-        var scale = DpiScale(monitor, windowHandle);
-        var cardWidth = _cardWidthDip * scale;
-        var cardHeight = _cardHeightDip * scale;
-        var workArea = WorkArea(monitor, windowHandle);
+        var scale = ScaleFor(window);
+        var monitor = saved is null ? MonitorForWindow(window) : MonitorForFrame(saved, scale);
+        var workArea = WorkArea(monitor, scale, window);
 
         return saved is null
-            ? (DesktopCardPlacementCore.Default(workArea, cardWidth, cardHeight), false)
-            : (DesktopCardPlacementCore.Clamp(saved, workArea, cardWidth, cardHeight), true);
+            ? (DesktopCardPlacementCore.Default(workArea, _cardWidth, _cardHeight), false)
+            : (DesktopCardPlacementCore.Clamp(saved, workArea, _cardWidth, _cardHeight), true);
     }
 
-    /// <summary>Applies a device-pixel frame; <paramref name="sendToBottom"/> keeps the desktop layer.</summary>
-    internal static void Apply(IntPtr windowHandle, DesktopCardFrame frame, bool sendToBottom)
+    /// <summary>Applies a DIP frame through WPF, then optionally pushes the card to the desktop layer.</summary>
+    internal static void Apply(Window window, DesktopCardFrame frame, bool sendToBottom)
     {
-        if (windowHandle == IntPtr.Zero) return;
+        window.Width = frame.Width > 0 ? frame.Width : window.Width;
+        window.Height = frame.Height > 0 ? frame.Height : window.Height;
+        window.Left = frame.X;
+        window.Top = frame.Y;
 
-        var insertAfter = sendToBottom ? NativeMethods.HwndBottom : IntPtr.Zero;
-        var flags = NativeMethods.SwpNoActivate | NativeMethods.SwpNoOwnerZOrder;
-        if (!sendToBottom) flags |= NativeMethods.SwpNoZOrder;
-
-        NativeMethods.SetWindowPos(
-            windowHandle,
-            insertAfter,
-            (int)Math.Round(frame.X),
-            (int)Math.Round(frame.Y),
-            (int)Math.Round(frame.Width),
-            (int)Math.Round(frame.Height),
-            flags);
+        if (sendToBottom) SendToBottom(window);
     }
 
-    internal static void SendToBottom(IntPtr windowHandle)
+    /// <summary>Keeps the card below every normal window without activating it.</summary>
+    internal static void SendToBottom(Window window)
     {
-        if (windowHandle == IntPtr.Zero) return;
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero) return;
         NativeMethods.SetWindowPos(
-            windowHandle,
+            handle,
             NativeMethods.HwndBottom,
             0,
             0,
@@ -66,27 +67,41 @@ internal sealed class DesktopCardPlacement
             NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
     }
 
-    /// <summary>Reads the current window frame back as a device-pixel rect for persistence.</summary>
-    internal static DesktopCardFrame Capture(IntPtr windowHandle)
-        => !NativeMethods.GetWindowRect(windowHandle, out var rect)
-            ? new DesktopCardFrame(0, 0, 0, 0)
-            : new DesktopCardFrame(
-                rect.Left,
-                rect.Top,
-                rect.Right - rect.Left,
-                rect.Bottom - rect.Top);
+    /// <summary>Reads the current WPF frame for persistence.</summary>
+    internal static DesktopCardFrame Capture(Window window)
+        => new(window.Left, window.Top, window.Width, window.Height);
 
-    private static IntPtr MonitorForFrame(DesktopCardFrame frame)
+    private static double ScaleFor(Window window)
     {
-        var rect = ToRect(frame);
+        try
+        {
+            var dpi = VisualTreeHelper.GetDpi(window);
+            return dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1d;
+        }
+        catch (InvalidOperationException)
+        {
+            return 1d;
+        }
+    }
+
+    private static IntPtr MonitorForFrame(DesktopCardFrame frame, double scale)
+    {
+        var rect = new NativeMethods.Rect
+        {
+            Left = (int)Math.Round(frame.X * scale),
+            Top = (int)Math.Round(frame.Y * scale),
+            Right = (int)Math.Round((frame.X + frame.Width) * scale),
+            Bottom = (int)Math.Round((frame.Y + frame.Height) * scale)
+        };
         return NativeMethods.MonitorFromRect(ref rect, NativeMethods.MonitorDefaultToNearest);
     }
 
-    private static IntPtr MonitorForWindow(IntPtr windowHandle)
+    private static IntPtr MonitorForWindow(Window window)
     {
-        if (windowHandle != IntPtr.Zero && NativeMethods.GetWindowRect(windowHandle, out var rect))
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle != IntPtr.Zero)
         {
-            return NativeMethods.MonitorFromRect(ref rect, NativeMethods.MonitorDefaultToNearest);
+            return NativeMethods.MonitorFromWindow(handle, NativeMethods.MonitorDefaultToNearest);
         }
 
         var primary = System.Windows.Forms.Screen.PrimaryScreen!;
@@ -95,64 +110,32 @@ internal sealed class DesktopCardPlacement
             NativeMethods.MonitorDefaultToNearest);
     }
 
-    private static DesktopWorkArea WorkArea(IntPtr monitor, IntPtr windowHandle)
+    private static DesktopWorkArea WorkArea(IntPtr monitor, double scale, Window window)
     {
         var info = new NativeMethods.MonitorInfo { Size = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
         if (monitor != IntPtr.Zero && NativeMethods.GetMonitorInfo(monitor, ref info))
         {
-            return new DesktopWorkArea(
-                info.Work.Left,
-                info.Work.Top,
-                info.Work.Right - info.Work.Left,
-                info.Work.Bottom - info.Work.Top);
+            return ToWorkArea(info.Work, scale);
         }
 
-        var fallback = System.Windows.Forms.Screen.FromHandle(windowHandle);
-        var area = windowHandle == IntPtr.Zero
+        var handle = new WindowInteropHelper(window).Handle;
+        var area = handle == IntPtr.Zero
             ? System.Windows.Forms.Screen.PrimaryScreen!.WorkingArea
-            : fallback.WorkingArea;
-        return new DesktopWorkArea(area.Left, area.Top, area.Width, area.Height);
+            : System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;
+        return new DesktopWorkArea(area.Left / scale, area.Top / scale, area.Width / scale, area.Height / scale);
     }
 
-    private static double DpiScale(IntPtr monitor, IntPtr windowHandle)
-    {
-        if (monitor != IntPtr.Zero)
-        {
-            try
-            {
-                if (GetDpiForMonitor(monitor, 0, out var dpiX, out _) == 0 && dpiX > 0)
-                {
-                    return dpiX / 96d;
-                }
-            }
-            catch (DllNotFoundException)
-            {
-            }
-            catch (EntryPointNotFoundException)
-            {
-            }
-        }
-
-        var dpi = windowHandle == IntPtr.Zero ? 0 : NativeMethods.GetDpiForWindow(windowHandle);
-        return dpi == 0 ? 1d : dpi / 96d;
-    }
-
-    private static NativeMethods.Rect ToRect(DesktopCardFrame frame)
-        => new()
-        {
-            Left = (int)Math.Round(frame.X),
-            Top = (int)Math.Round(frame.Y),
-            Right = (int)Math.Round(frame.X + frame.Width),
-            Bottom = (int)Math.Round(frame.Y + frame.Height)
-        };
-
-    [DllImport("shcore.dll")]
-    private static extern int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
+    private static DesktopWorkArea ToWorkArea(NativeMethods.Rect work, double scale)
+        => new(
+            work.Left / scale,
+            work.Top / scale,
+            (work.Right - work.Left) / scale,
+            (work.Bottom - work.Top) / scale);
 }
 
 /// <summary>
-/// Pure placement math shared with the core tests. Coordinates are device pixels with the
-/// origin at the top-left corner of the virtual desktop.
+/// Thin facade over the pure placement math in <see cref="Core.Persistence.DesktopCardPlacement"/>
+/// so the WPF window and the core tests share one implementation.
 /// </summary>
 internal static class DesktopCardPlacementCore
 {

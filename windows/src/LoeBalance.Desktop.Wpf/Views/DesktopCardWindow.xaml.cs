@@ -101,10 +101,13 @@ public partial class DesktopCardWindow : Window, IDesktopCardPresenter
 
         if (visible)
         {
-            var (frame, _) = _placement.Resolve(_handle, _savedFrame);
-            DesktopCardPlacement.Apply(_handle, frame, sendToBottom: true);
+            // Create the window handle (and its per-monitor DPI) before solving the position
+            // so the placement math uses the real scale factor instead of assuming 100%.
+            EnsureHandle();
+            var (frame, _) = _placement.Resolve(this, _savedFrame);
+            DesktopCardPlacement.Apply(this, frame, sendToBottom: false);
             Show();
-            DesktopCardPlacement.Apply(_handle, frame, sendToBottom: true);
+            DesktopCardPlacement.SendToBottom(this);
         }
         else
         {
@@ -116,14 +119,20 @@ public partial class DesktopCardWindow : Window, IDesktopCardPresenter
     /// <summary>Applies the persisted frame; called after the window handle exists.</summary>
     internal void ApplySavedPlacement(DesktopCardFrame? savedFrame)
     {
-        if (_handle == IntPtr.Zero) return;
-        var (frame, _) = _placement.Resolve(_handle, savedFrame);
-        DesktopCardPlacement.Apply(_handle, frame, sendToBottom: true);
+        EnsureHandle();
+        var (frame, _) = _placement.Resolve(this, savedFrame);
+        DesktopCardPlacement.Apply(this, frame, sendToBottom: false);
+    }
+
+    private void EnsureHandle()
+    {
+        if (_handle != IntPtr.Zero) return;
+        _handle = new WindowInteropHelper(this).EnsureHandle();
     }
 
     internal void ReassertDesktopLayer()
     {
-        if (_visible) DesktopCardPlacement.SendToBottom(_handle);
+        if (_visible) DesktopCardPlacement.SendToBottom(this);
     }
 
     public void Dispose()
@@ -190,8 +199,8 @@ public partial class DesktopCardWindow : Window, IDesktopCardPresenter
 
     private void PersistFrame()
     {
-        if (_handle == IntPtr.Zero || _frameChanged is null) return;
-        var frame = DesktopCardPlacement.Capture(_handle);
+        if (_frameChanged is null) return;
+        var frame = DesktopCardPlacement.Capture(this);
         if (frame.Width > 0 && frame.Height > 0) _frameChanged(frame);
     }
 

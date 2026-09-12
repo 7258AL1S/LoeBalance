@@ -215,3 +215,101 @@ The Windows port is ready for release only when all of the following are true:
 - Sleep/wake and network recovery are verified.
 - Installer is signed and tested on a clean Windows user account.
 - GitHub Release notes clearly identify `win-x64` and `win-x86` packages.
+
+## 12. Windows Implementation Update (2026-09-12, Windows workstation)
+
+This section records what the Windows session completed on top of the handoff above.
+Nothing under `Sources/`, `Tests/`, `script/`, or `outputs/` was modified, and every
+Windows change lives under `windows/`.
+
+### 12.1 Build fixes required before the port could compile
+
+| File | Problem | Fix |
+|---|---|---|
+| `windows/src/LoeBalance.Core/Animation/DamageAnimationPlanner.cs` | `CS0173`: conditional expression between `ShakeStrength` and `null` | Declared the local as `ShakeStrength?`, matching the Swift optional `shakeStrength` |
+| `windows/src/LoeBalance.Desktop.Wpf/App.xaml.cs` | `CS0104`: `Application` ambiguous between WPF and WinForms | Qualify as `System.Windows.Application` |
+| `windows/src/LoeBalance.Desktop.Wpf/LoeBalance.Desktop.Wpf.csproj` | `NETSDK1137` deprecated `Microsoft.NET.Sdk.WindowsDesktop` | Use `Microsoft.NET.Sdk` and keep `UseWPF`/`UseWindowsForms` |
+
+The failing GitHub Actions run `34701033140` stopped on exactly the `DamageAnimationPlanner`
+error, so the first Windows build reproduced the same failure before the fix.
+
+### 12.2 Behaviour gaps found while reviewing the ported core
+
+1. `PersistedSnapshotState` did not bound or reorder recent usage ids. With a saturated
+   cache the newest ids were dropped and the next refresh replayed debit animations.
+   Fixed with macOS `recordUsageIDs` semantics (move to the end, dedupe, keep newest 500).
+2. `Money` accepted `1,234.56` and other non-strict numeric strings that the macOS grammar
+   rejects. Now validated against the same strict decimal pattern.
+3. `AuthManager` used a two-minute proactive refresh window, did not verify the refreshed
+   user id, and could reuse a session without a user id. Now 60 seconds, user id verified,
+   and a user mismatch invalidates the stored credential.
+4. `RefreshScheduler` treated a past or missing `Retry-After` as an immediate retry, which
+   could busy-loop, and an unexpected exception stopped the loop. Now mirrors the macOS
+   `applyRateLimit` rules (future deadline wins, otherwise bounded backoff) and the loop
+   survives unexpected failures.
+5. `IWindowsSettingsStore` inherited both `ISettingsStore` and `ISnapshotStore`, which
+   declare `LoadAsync` with different return types and cannot be implemented by one class.
+   Split into `IWindowsSettingsStore` and `IWindowsSnapshotStore`.
+
+### 12.3 Implemented on Windows
+
+- `WindowsCredentialStore`: `CredRead`/`CredWrite`/`CredDelete` against the generic
+  credential target `LoeBalance:sub2api-refresh-token`. The stored blob is JSON with
+  exactly two fields, `refreshToken` and `userId`. Passwords and access tokens are never
+  written to disk; the access token stays in memory.
+- `LocalAppDataSettingsStore` / `LocalAppDataSnapshotStore`: separate JSON files under
+  `%LOCALAPPDATA%\LoeBalance`, written to a temporary file, flushed to disk, then moved
+  over the target.
+- `NetworkAvailabilityMonitor`: `NetworkAvailabilityChanged` plus `NetworkAddressChanged`,
+  deduplicated, handlers detached on `Stop`/`Dispose`.
+- `PowerResumeMonitor`: `SystemEvents.PowerModeChanged` resume notifications, detached on
+  `Stop`/`Dispose`, degrades gracefully when power notifications are unavailable.
+- `StartupRegistration`: per-user `Run` key registration that reports the actual registry
+  state after every change.
+- `TrayPresenter`: connection-state icon, balance/status tooltip, and the context menu
+  (balance, status, Refresh Now, Show/Hide Desktop Card, Settings, Log Out, Quit) with the
+  macOS enablement rules. No floating debit numbers are drawn next to the tray icon.
+- `DesktopCardWindow`: borderless, `ShowInTaskbar=false`, `WS_EX_NOACTIVATE` +
+  `WS_EX_TOOLWINDOW`, never topmost, pushed to the desktop layer, drag to move, position
+  memory, and work-area clamping on the owning monitor.
+- `DamageStreamCanvas`: one visual track, `index * 0.23s` launch delays, bounded random
+  horizontal offsets, red debit and green credit text, plus card-only shake for the first
+  debit of a burst and reduced travel under Reduce Motion.
+- WPF login and settings windows, `AppCoordinator` composition root, single-instance guard,
+  and `ShutdownMode.OnExplicitShutdown` so the tray keeps the process alive.
+- `--preview-card` diagnostic mode and `windows/tools/verify-desktop-card.ps1` for
+  real-machine checks of z-order, DPI, clamping and the animation stream.
+
+### 12.4 Verification performed on Windows
+
+Executed on this workstation (Windows, .NET SDK 8.0.425 installed into the session's work
+directory because the machine had runtimes only):
+
+| Command | Result |
+|---|---|
+| `dotnet restore windows\LoeBalance.Windows.sln` | success |
+| `dotnet build windows\LoeBalance.Windows.sln -c Release` | success, 0 warnings, 0 errors |
+| `dotnet test windows\tests\LoeBalance.Core.Tests\...` | 67 passed, 0 failed |
+| `dotnet test windows\tests\LoeBalance.Platform.Windows.Tests\...` | 17 passed, 0 failed (real Credential Manager, registry and file-store usage) |
+| `dotnet publish ... -r win-x64 --self-contained true` | success |
+| `dotnet publish ... -r win-x86 --self-contained true` | success |
+
+Real-machine observations from launching the published `win-x64` build:
+
+- Normal start with no stored credential: process stays alive and shows the Sign In window.
+- Second instance exits immediately (single-instance guard).
+- `--preview-card`: the card window reports `WS_EX_TOOLWINDOW` and `WS_EX_NOACTIVATE`, has
+  no `WS_EX_APPWINDOW` (no taskbar button), is not topmost, and stays visible.
+- Moving the card to `300,200` writes `desktopCardFrame` `{x:300, y:200, 326x218}` to
+  `%LOCALAPPDATA%\LoeBalance\settings.json`; the next start restores it exactly.
+- A saved off-screen frame of `5000,5000` is clamped back inside the monitor work area.
+- A mixed DPI defect (native `SetWindowPos` pixels fighting WPF's DIP model at 150%) was
+  found during this testing and fixed by letting WPF own `Left`/`Top` in DIPs.
+
+### 12.5 Still requires manual verification
+
+- Live login and balance refresh against the real API with a real account.
+- 125% / 150% DPI and mixed-DPI multi-monitor placement (only 100% DPI was exercised here).
+- Sleep/wake refresh, network disconnect/reconnect refresh, and live `Retry-After` behavior.
+- Tray tooltip truncation and context-menu behavior at high DPI.
+- Installer, Authenticode signing, and SmartScreen validation.

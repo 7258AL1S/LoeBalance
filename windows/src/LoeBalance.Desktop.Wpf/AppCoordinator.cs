@@ -125,6 +125,45 @@ internal sealed class AppCoordinator : IDisposable
         }
     }
 
+    /// <summary>
+    /// Diagnostic entry point used by <c>--preview-card</c>. It shows the desktop card with a
+    /// synthetic snapshot and a repeating debit/credit burst, without touching the network or
+    /// the stored credentials, so layout, DPI, z-order and animation behaviour can be checked
+    /// on a real desktop.
+    /// </summary>
+    internal async Task StartPreviewAsync()
+    {
+        await LoadStateAsync();
+        _authenticated = true;
+
+        var snapshot = new BalanceSnapshot(new Money(19.58m), new Money(2.34m), 17, DateTimeOffset.Now);
+        _currentSnapshot = snapshot;
+        _card.SetVisible(true);
+        _card.Present(snapshot, new ConnectionState.Online());
+        _tray.Present(snapshot, new ConnectionState.Online(), _preferences.ShowsDesktopCard);
+
+        var burst = new BalanceAnimationEvent[]
+        {
+            new BalanceAnimationEvent.Debit(new Money(0.30m)),
+            new BalanceAnimationEvent.Debit(new Money(0.29m)),
+            new BalanceAnimationEvent.Debit(new Money(0.28m)),
+            new BalanceAnimationEvent.Debit(new Money(0.05m)),
+            new BalanceAnimationEvent.Credit(new Money(5m))
+        };
+        PlayPreviewBurst(burst);
+
+        // Repeat so the animation can be observed for as long as the preview stays open.
+        var timer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(2.5)
+        };
+        timer.Tick += (_, _) => PlayPreviewBurst([new BalanceAnimationEvent.Debit(new Money(0.07m))]);
+        timer.Start();
+    }
+
+    private void PlayPreviewBurst(IReadOnlyList<BalanceAnimationEvent> events)
+        => _card.Play(_planner.Plan(events, DamageSurface.Desktop, _preferences.ShakeStrength, ReduceMotion()));
+
     private async Task<RefreshResult> RefreshAsync(CancellationToken cancellationToken)
     {
         try

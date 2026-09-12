@@ -24,7 +24,9 @@ public partial class App : System.Windows.Application
 
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         _coordinator = new AppCoordinator();
-        _ = _coordinator.StartAsync();
+        _ = e.Args.Contains("--preview-card", StringComparer.OrdinalIgnoreCase)
+            ? _coordinator.StartPreviewAsync()
+            : _coordinator.StartAsync();
     }
 
     protected override void OnExit(ExitEventArgs e)
