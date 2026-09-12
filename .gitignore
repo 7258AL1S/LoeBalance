@@ -1,8 +1,17 @@
+# macOS and IDE files
 .DS_Store
+*.xcuserstate
+DerivedData/
+
+# Swift Package Manager
 .build/
-.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-4/
+.swiftpm/
+
+# Local development and generated artifacts
 .worktrees/
-.superpowers/
 dist/
 outputs/
 work/
+
+# Local planning and test-harness scratch files. Previously tracked files remain tracked.
+.superpowers/
