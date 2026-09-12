@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 - 2026-09-12
+
+- 增加可复现的双架构发布脚本。
+- 同时发布 Intel Mac（`x86_64`）和 Apple Silicon（`arm64`）安装包。
+
 ## 0.1.0 - 2026-09-12
 
 - 增加 macOS 桌面余额卡片和菜单栏余额显示。
@@ -9,4 +14,3 @@
 - 增加 Keychain 凭据保存、Token 自动刷新和退出登录。
 - 增加网络恢复、系统唤醒、限流退避和缓存恢复处理。
 - 增加 SwiftPM 构建脚本、独立测试 harness 和 Intel Mac 发布包。
-- 同时提供 Intel Mac（`x86_64`）和 Apple Silicon（`arm64`）发布包。
