@@ -69,6 +69,7 @@ private actor HarnessScheduler: RefreshScheduling {
     func stop() {}
     func updateInterval(_ seconds: TimeInterval) { interval = seconds }
     func refreshNow() async {}
+    func networkBecameUnavailable() {}
     func networkBecameAvailable() async {}
     func systemDidWake() async {}
 }
