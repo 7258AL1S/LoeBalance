@@ -5,11 +5,13 @@ DerivedData/
 
 # Swift Package Manager
 .build/
+.build-*/
 .swiftpm/
 
 # Local development and generated artifacts
 .worktrees/
 dist/
+.release-staging/
 outputs/
 work/
 

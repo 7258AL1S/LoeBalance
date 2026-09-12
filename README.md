@@ -16,12 +16,12 @@ LoeBalance 是一个面向 [Sub2API](https://api.loe.cx/) 的非官方 macOS 余
 ## 系统要求
 
 - macOS 13 Ventura 或更高版本。
-- 当前发布包面向 Intel Mac（`x86_64`）。
+- 当前发布包同时提供 Intel Mac（`x86_64`）和 Apple Silicon（`arm64`）版本。
 - 有效的 Sub2API 账户。
 
 ## 安装
 
-1. 从 GitHub Releases 下载 `LoeBalance-macOS-x86_64.zip`。
+1. 从 GitHub Releases 下载与你的 Mac 芯片匹配的安装包：`x86_64` 对应 Intel，`arm64` 对应 Apple Silicon。
 2. 解压后将 `LoeBalance.app` 移入“应用程序”文件夹。
 3. 首次启动时，若 macOS 阻止打开，请在 Finder 中右键应用并选择“打开”。
 4. 使用 Sub2API 邮箱和密码登录。
@@ -62,6 +62,14 @@ cd LoeBalance
 swift build
 ```
 
+生成两个架构的发布包：
+
+```bash
+./script/package_release.sh 0.1.0
+```
+
+发布包会写入 `outputs/`，分别为 `LoeBalance-macOS-x86_64.zip` 和 `LoeBalance-macOS-arm64.zip`。
+
 运行 XCTest 需要完整 Xcode 工具链：
 
 ```bash
@@ -91,4 +99,3 @@ docs/              设计与实施文档
 ## 说明
 
 本项目不是 Sub2API 官方客户端。API 结构或服务端行为发生变化时，应用可能需要同步更新。
-

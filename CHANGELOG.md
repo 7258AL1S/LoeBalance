@@ -9,4 +9,4 @@
 - 增加 Keychain 凭据保存、Token 自动刷新和退出登录。
 - 增加网络恢复、系统唤醒、限流退避和缓存恢复处理。
 - 增加 SwiftPM 构建脚本、独立测试 harness 和 Intel Mac 发布包。
-
+- 同时提供 Intel Mac（`x86_64`）和 Apple Silicon（`arm64`）发布包。
