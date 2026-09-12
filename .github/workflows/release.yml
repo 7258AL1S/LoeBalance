@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the leading v (for example 0.2.0). Builds artifacts without publishing.'
+        required: true
+        default: '0.2.0'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: macOS packages
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Package macOS app (x86_64 and arm64)
+        run: bash script/package_release.sh "${{ steps.version.outputs.value }}"
+
+      - name: Upload macOS packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            outputs/LoeBalance-macOS-*.zip
+            outputs/LoeBalance-macOS-*.sha256
+          if-no-files-found: error
+
+  windows:
+    name: Windows installers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            "value=$($env:GITHUB_REF_NAME -replace '^v','')" >> $env:GITHUB_OUTPUT
+          } else {
+            "value=${{ inputs.version }}" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Ensure Inno Setup
+        shell: pwsh
+        run: |
+          $paths = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          )
+          if (-not ($paths | Where-Object { Test-Path $_ })) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Test core and platform adapters
+        shell: pwsh
+        run: |
+          dotnet test windows\tests\LoeBalance.Core.Tests\LoeBalance.Core.Tests.csproj -c Release
+          dotnet test windows\tests\LoeBalance.Platform.Windows.Tests\LoeBalance.Platform.Windows.Tests.csproj -c Release
+
+      - name: Build installers
+        shell: pwsh
+        run: pwsh -File windows\tools\build-installers.ps1 -Version ${{ steps.version.outputs.value }}
+
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            work/installer/LoeBalance-Setup-*.exe
+            work/installer/LoeBalance-Setup-*.exe.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    # Tag pushes publish; manual runs only build the artifacts.
+    if: github.event_name == 'push'
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Show collected assets
+        run: ls -l dist
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME="LoeBalance ${VERSION}"
+          NOTES="docs/releases/${VERSION}.md"
+
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            gh release upload "v${VERSION}" dist/* --clobber
+          elif [ -f "$NOTES" ]; then
+            gh release create "v${VERSION}" --title "$NAME" --notes-file "$NOTES" dist/*
+          else
+            gh release create "v${VERSION}" --title "$NAME" --generate-notes dist/*
+          fi
