@@ -22,7 +22,8 @@ final class SettingsViewModelTests: XCTestCase {
         await viewModel.submit()
 
         XCTAssertEqual(viewModel.errorMessage, "Password must be at least 6 characters.")
-        XCTAssertEqual(await api.loginCallCount, 0)
+        let shortPasswordLoginCount = await api.loginCallCount
+        XCTAssertEqual(shortPasswordLoginCount, 0)
     }
 
     func testLoginClearsPublishedPasswordAfterSuccessAndFailure() async {
@@ -51,6 +52,31 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertNotNil(failingViewModel.errorMessage)
         let failedPassword = await failingAPI.lastPassword
         XCTAssertEqual(failedPassword, "secret")
+    }
+
+    func testConcurrentLoginSubmitIsIgnoredBeforeValidationOrSecondRequest() async {
+        let started = AsyncGate()
+        let release = AsyncGate()
+        let api = SettingsTestAPI(loginStarted: started, loginGate: release)
+        let auth = AuthManager(api: api, credentials: SettingsCredentialStore())
+        let viewModel = LoginViewModel(auth: auth)
+        viewModel.email = "user@example.com"
+        viewModel.password = "secret"
+
+        let first = Task { await viewModel.submit() }
+        await started.wait()
+        viewModel.email = "invalid"
+        viewModel.password = "short"
+        let errorBeforeSecondSubmit = viewModel.errorMessage
+
+        await viewModel.submit()
+
+        let callsWhileInFlight = await api.loginCallCount
+        XCTAssertTrue(viewModel.isSubmitting)
+        XCTAssertEqual(viewModel.errorMessage, errorBeforeSecondSubmit)
+        XCTAssertEqual(callsWhileInFlight, 1)
+        await release.open()
+        await first.value
     }
 
     func testIntervalPresetsAndCustomSecondsMinutesClampAndPersist() async throws {
@@ -108,6 +134,59 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.showsDesktopCard)
     }
 
+    func testPreferenceSaveFailureKeepsShakeAndCardStateAndSuppressesCallbacks() {
+        let preferences = SettingsPreferencesStore()
+        let scheduler = SettingsScheduler()
+        let launch = SettingsLaunchService()
+        var shakeCallbackCount = 0
+        var cardCallbackCount = 0
+        let viewModel = SettingsViewModel(
+            preferencesStore: preferences,
+            scheduler: scheduler,
+            launchAtLogin: launch,
+            onShakeStrengthChanged: { _ in shakeCallbackCount += 1 },
+            onShowsDesktopCardChanged: { _ in cardCallbackCount += 1 },
+            logout: {}
+        )
+        preferences.saveError = .failed
+
+        viewModel.setShakeStrength(.strong)
+        viewModel.setShowsDesktopCard(false)
+
+        XCTAssertEqual(viewModel.shakeStrength, .weak)
+        XCTAssertTrue(viewModel.showsDesktopCard)
+        XCTAssertEqual(shakeCallbackCount, 0)
+        XCTAssertEqual(cardCallbackCount, 0)
+        XCTAssertEqual(viewModel.errorMessage, "Unable to save settings.")
+    }
+
+    func testIntervalSaveFailureRestoresLastPersistedControlsAndDoesNotUpdateScheduler() async {
+        let preferences = SettingsPreferencesStore(preferences: AppPreferences(refreshInterval: 30))
+        let scheduler = SettingsScheduler()
+        let viewModel = SettingsViewModel(
+            preferencesStore: preferences,
+            scheduler: scheduler,
+            launchAtLogin: SettingsLaunchService(),
+            logout: {}
+        )
+        viewModel.refreshPreset = .custom
+        viewModel.refreshUnit = .minutes
+        viewModel.customInterval = "2"
+        preferences.saveError = .failed
+
+        do {
+            try await viewModel.applyRefreshInterval()
+            XCTFail("Expected persistence failure")
+        } catch {
+            let schedulerInterval = await scheduler.lastInterval
+            XCTAssertNil(schedulerInterval)
+            XCTAssertEqual(viewModel.refreshPreset, .thirtySeconds)
+            XCTAssertEqual(viewModel.customInterval, "30")
+            XCTAssertEqual(viewModel.refreshUnit, .seconds)
+            XCTAssertEqual(viewModel.errorMessage, "Unable to save settings.")
+        }
+    }
+
     func testLaunchAtLoginUsesActualStateAndRevertsOnFailure() throws {
         let preferences = SettingsPreferencesStore()
         let scheduler = SettingsScheduler()
@@ -129,6 +208,23 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertTrue(launch.isEnabled)
     }
 
+    func testLaunchAtLoginSaveFailureRestoresActualServiceAndPreferenceState() {
+        let preferences = SettingsPreferencesStore()
+        let launch = SettingsLaunchService()
+        let viewModel = SettingsViewModel(
+            preferencesStore: preferences,
+            scheduler: SettingsScheduler(),
+            launchAtLogin: launch,
+            logout: {}
+        )
+        preferences.saveError = .failed
+
+        XCTAssertThrowsError(try viewModel.setLaunchAtLogin(true))
+        XCTAssertFalse(viewModel.launchAtLogin)
+        XCTAssertFalse(launch.isEnabled)
+        XCTAssertEqual(viewModel.errorMessage, "Unable to save settings.")
+    }
+
     func testLogoutCommandIsInvoked() async {
         let recorder = LogoutRecorder()
         let viewModel = SettingsViewModel(
@@ -147,16 +243,26 @@ final class SettingsViewModelTests: XCTestCase {
 
 private actor SettingsTestAPI: APIClientProtocol {
     private let loginResult: Result<AuthSession, AppError>
+    private let loginStarted: AsyncGate?
+    private let loginGate: AsyncGate?
     private(set) var loginCallCount = 0
     private(set) var lastPassword = ""
 
-    init(loginResult: Result<AuthSession, AppError> = .success(.fixture)) {
+    init(
+        loginResult: Result<AuthSession, AppError> = .success(.fixture),
+        loginStarted: AsyncGate? = nil,
+        loginGate: AsyncGate? = nil
+    ) {
         self.loginResult = loginResult
+        self.loginStarted = loginStarted
+        self.loginGate = loginGate
     }
 
     func login(email: String, password: String) async throws -> AuthSession {
         loginCallCount += 1
         lastPassword = password
+        await loginStarted?.open()
+        await loginGate?.wait()
         return try loginResult.get()
     }
 
@@ -175,9 +281,15 @@ private final class SettingsCredentialStore: CredentialStoreProtocol, @unchecked
 
 private final class SettingsPreferencesStore: PreferencesStoreProtocol {
     private var preferences: AppPreferences?
+    var saveError: SaveFailure?
     func load() throws -> AppPreferences? { preferences }
-    func save(_ preferences: AppPreferences) throws { self.preferences = preferences }
+    func save(_ preferences: AppPreferences) throws {
+        if let saveError { throw saveError }
+        self.preferences = preferences
+    }
 }
+
+private enum SaveFailure: Error { case failed }
 
 private actor SettingsScheduler: RefreshScheduling {
     private(set) var lastInterval: TimeInterval?

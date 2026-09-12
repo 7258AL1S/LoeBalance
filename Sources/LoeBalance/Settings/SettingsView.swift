@@ -19,7 +19,13 @@ struct SettingsView: View {
                 get: { viewModel.refreshPreset },
                 set: {
                     viewModel.selectRefreshPreset($0)
-                    Task { try? await viewModel.applyRefreshInterval() }
+                    Task {
+                        do {
+                            try await viewModel.applyRefreshInterval()
+                        } catch {
+                            // The view model restores the last persisted controls and publishes the error.
+                        }
+                    }
                 }
             )) {
                 ForEach(RefreshIntervalPreset.allCases) { preset in
@@ -38,7 +44,13 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     Button("Apply") {
-                        Task { try? await viewModel.applyRefreshInterval() }
+                        Task {
+                            do {
+                                try await viewModel.applyRefreshInterval()
+                            } catch {
+                                // The view model restores the last persisted controls and publishes the error.
+                            }
+                        }
                     }
                 }
             }
@@ -50,7 +62,13 @@ struct SettingsView: View {
 
             Toggle("Launch at Login", isOn: Binding(
                 get: { viewModel.launchAtLogin },
-                set: { value in try? viewModel.setLaunchAtLogin(value) }
+                set: { value in
+                    do {
+                        try viewModel.setLaunchAtLogin(value)
+                    } catch {
+                        // The view model restores the actual service state and publishes the error.
+                    }
+                }
             ))
 
             if let errorMessage = viewModel.errorMessage {

@@ -15,16 +15,26 @@ enum AppError: Error, Equatable, Sendable {
 
 private actor HarnessAPI: APIClientProtocol {
     private let result: Result<AuthSession, AppError>
+    private let loginStarted: AsyncGate?
+    private let loginGate: AsyncGate?
     private(set) var loginCount = 0
     private(set) var lastPassword = ""
 
-    init(result: Result<AuthSession, AppError>) {
+    init(
+        result: Result<AuthSession, AppError>,
+        loginStarted: AsyncGate? = nil,
+        loginGate: AsyncGate? = nil
+    ) {
         self.result = result
+        self.loginStarted = loginStarted
+        self.loginGate = loginGate
     }
 
     func login(email: String, password: String) async throws -> AuthSession {
         loginCount += 1
         lastPassword = password
+        await loginStarted?.open()
+        await loginGate?.wait()
         return try result.get()
     }
 
@@ -43,9 +53,15 @@ private final class HarnessCredentials: CredentialStoreProtocol, @unchecked Send
 
 private final class HarnessPreferences: PreferencesStoreProtocol {
     private(set) var value: AppPreferences?
+    var saveError: SaveFailure?
     func load() throws -> AppPreferences? { value }
-    func save(_ preferences: AppPreferences) throws { value = preferences }
+    func save(_ preferences: AppPreferences) throws {
+        if let saveError { throw saveError }
+        value = preferences
+    }
 }
+
+private enum SaveFailure: Error { case failed }
 
 private actor HarnessScheduler: RefreshScheduling {
     private(set) var interval: TimeInterval?
@@ -104,6 +120,25 @@ struct Task10Harness {
         require(failingLogin.password.isEmpty, "password cleared after failure")
         require(failingLogin.errorMessage != nil, "failure reported")
 
+        let started = AsyncGate()
+        let release = AsyncGate()
+        let gatedAPI = HarnessAPI(result: .success(session), loginStarted: started, loginGate: release)
+        let gatedAuth = AuthManager(api: gatedAPI, credentials: HarnessCredentials())
+        let gatedLogin = LoginViewModel(auth: gatedAuth)
+        gatedLogin.email = "user@example.com"
+        gatedLogin.password = "secret"
+        let firstSubmit = Task { await gatedLogin.submit() }
+        await started.wait()
+        gatedLogin.email = "invalid"
+        gatedLogin.password = "short"
+        await gatedLogin.submit()
+        let gatedCalls = await gatedAPI.loginCount
+        require(gatedLogin.isSubmitting, "concurrent submit remains in flight")
+        require(gatedLogin.errorMessage == nil, "concurrent submit preserves error state")
+        require(gatedCalls == 1, "concurrent submit does not issue second request")
+        await release.open()
+        await firstSubmit.value
+
         let preferences = HarnessPreferences()
         let scheduler = HarnessScheduler()
         let launch = HarnessLaunchService()
@@ -146,6 +181,44 @@ struct Task10Harness {
         require(preferences.value?.shakeStrength == .strong, "shake persistence")
         require(preferences.value?.showsDesktopCard == false, "card persistence")
 
+        let failedPreferences = HarnessPreferences()
+        let failedSettings = SettingsViewModel(
+            preferencesStore: failedPreferences,
+            scheduler: HarnessScheduler(),
+            launchAtLogin: HarnessLaunchService(),
+            logout: {}
+        )
+        failedPreferences.saveError = .failed
+        failedSettings.setShakeStrength(.strong)
+        failedSettings.setShowsDesktopCard(false)
+        require(failedSettings.shakeStrength == .weak, "shake rollback after save failure")
+        require(failedSettings.showsDesktopCard, "card rollback after save failure")
+        require(failedSettings.errorMessage == "Unable to save settings.", "save failure is visible")
+
+        let intervalPreferences = HarnessPreferences()
+        let intervalScheduler = HarnessScheduler()
+        let intervalSettings = SettingsViewModel(
+            preferencesStore: intervalPreferences,
+            scheduler: intervalScheduler,
+            launchAtLogin: HarnessLaunchService(),
+            logout: {}
+        )
+        intervalSettings.refreshPreset = .custom
+        intervalSettings.refreshUnit = .minutes
+        intervalSettings.customInterval = "2"
+        intervalPreferences.saveError = .failed
+        do {
+            try await intervalSettings.applyRefreshInterval()
+            fatalError("FAIL: interval persistence failure did not throw")
+        } catch {
+            let interval = await intervalScheduler.interval
+            require(interval == nil, "interval scheduler unchanged after save failure")
+            require(intervalSettings.refreshPreset == .thirtySeconds, "refresh preset rollback")
+            require(intervalSettings.customInterval == "30", "refresh value rollback")
+            require(intervalSettings.refreshUnit == .seconds, "refresh unit rollback")
+            require(intervalSettings.errorMessage == "Unable to save settings.", "interval failure is visible")
+        }
+
         try settings.setLaunchAtLogin(true)
         require(settings.launchAtLogin && launch.isEnabled, "launch registration state")
         launch.failure = .failed
@@ -156,9 +229,44 @@ struct Task10Harness {
             require(settings.launchAtLogin && launch.isEnabled, "launch toggle rollback")
         }
 
+        let launchSavePreferences = HarnessPreferences()
+        let launchSaveService = HarnessLaunchService()
+        let launchSaveSettings = SettingsViewModel(
+            preferencesStore: launchSavePreferences,
+            scheduler: HarnessScheduler(),
+            launchAtLogin: launchSaveService,
+            logout: {}
+        )
+        launchSavePreferences.saveError = .failed
+        do {
+            try launchSaveSettings.setLaunchAtLogin(true)
+            fatalError("FAIL: launch persistence failure did not throw")
+        } catch {
+            require(!launchSaveSettings.launchAtLogin, "launch UI rollback after save failure")
+            require(!launchSaveService.isEnabled, "launch service rollback after save failure")
+            require(launchSaveSettings.errorMessage == "Unable to save settings.", "launch failure is visible")
+        }
+
         await settings.logout()
         require(logoutCount == 1, "logout command")
         print("task-10 harness passed: login validation/cleanup, interval settings, callbacks, launch rollback, logout")
+    }
+}
+
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
     }
 }
 

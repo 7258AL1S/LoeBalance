@@ -57,6 +57,9 @@ final class SettingsViewModel: ObservableObject {
     private let scheduler: any RefreshScheduling
     private let launchAtLoginService: any LaunchAtLoginServicing
     private var preferences: AppPreferences
+    private var persistedRefreshPreset: RefreshIntervalPreset
+    private var persistedCustomInterval: String
+    private var persistedRefreshUnit: RefreshIntervalUnit
     private let onShakeStrengthChanged: @MainActor (ShakeStrength) -> Void
     private let onShowsDesktopCardChanged: @MainActor (Bool) -> Void
     private let logoutAction: @MainActor () async -> Void
@@ -76,9 +79,15 @@ final class SettingsViewModel: ObservableObject {
         self.shakeStrength = self.preferences.shakeStrength
         self.showsDesktopCard = self.preferences.showsDesktopCard
         self.launchAtLogin = launchAtLogin.isEnabled
-        self.customInterval = String(format: "%.0f", self.preferences.refreshInterval)
-        self.refreshUnit = .seconds
-        self.refreshPreset = Self.preset(for: self.preferences.refreshInterval)
+        let initialCustomInterval = String(format: "%.0f", self.preferences.refreshInterval)
+        let initialRefreshUnit = RefreshIntervalUnit.seconds
+        let initialRefreshPreset = Self.preset(for: self.preferences.refreshInterval)
+        self.customInterval = initialCustomInterval
+        self.refreshUnit = initialRefreshUnit
+        self.refreshPreset = initialRefreshPreset
+        self.persistedRefreshPreset = initialRefreshPreset
+        self.persistedCustomInterval = initialCustomInterval
+        self.persistedRefreshUnit = initialRefreshUnit
         self.onShakeStrengthChanged = onShakeStrengthChanged
         self.onShowsDesktopCardChanged = onShowsDesktopCardChanged
         self.logoutAction = logout
@@ -95,54 +104,106 @@ final class SettingsViewModel: ObservableObject {
     func applyRefreshInterval() async throws {
         let raw = customInterval.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let value = Double(raw), value.isFinite, value >= 0 else {
+            restorePersistedRefreshInterval()
+            errorMessage = "Enter a valid refresh interval."
             throw SettingsError.invalidInterval
         }
 
         let seconds = refreshUnit == .minutes ? value * 60 : value
-        preferences.setRefreshInterval(seconds)
-        customInterval = String(format: "%.0f", preferences.refreshInterval)
-        refreshPreset = Self.preset(for: preferences.refreshInterval)
-        try preferencesStore.save(preferences)
-        await scheduler.updateInterval(preferences.refreshInterval)
+        var candidate = preferences
+        candidate.setRefreshInterval(seconds)
+        let candidatePreset = Self.preset(for: candidate.refreshInterval)
+        let candidateCustomInterval = String(format: "%.0f", candidate.refreshInterval)
+        let candidateUnit = candidatePreset == .custom ? refreshUnit : .seconds
+
+        do {
+            try preferencesStore.save(candidate)
+        } catch {
+            restorePersistedRefreshInterval()
+            errorMessage = "Unable to save settings."
+            throw error
+        }
+
+        preferences = candidate
+        refreshPreset = candidatePreset
+        customInterval = candidateCustomInterval
+        refreshUnit = candidateUnit
+        persistedRefreshPreset = candidatePreset
+        persistedCustomInterval = candidateCustomInterval
+        persistedRefreshUnit = candidateUnit
+        errorMessage = nil
+        await scheduler.updateInterval(candidate.refreshInterval)
     }
 
     func setShakeStrength(_ value: ShakeStrength) {
+        var candidate = preferences
+        candidate.shakeStrength = value
+        do {
+            try preferencesStore.save(candidate)
+        } catch {
+            errorMessage = "Unable to save settings."
+            return
+        }
+        preferences = candidate
         shakeStrength = value
-        preferences.shakeStrength = value
-        persistPreferences()
+        errorMessage = nil
         onShakeStrengthChanged(value)
     }
 
     func setShowsDesktopCard(_ value: Bool) {
+        var candidate = preferences
+        candidate.showsDesktopCard = value
+        do {
+            try preferencesStore.save(candidate)
+        } catch {
+            errorMessage = "Unable to save settings."
+            return
+        }
+        preferences = candidate
         showsDesktopCard = value
-        preferences.showsDesktopCard = value
-        persistPreferences()
+        errorMessage = nil
         onShowsDesktopCardChanged(value)
     }
 
     func setLaunchAtLogin(_ value: Bool) throws {
+        let previousServiceState = launchAtLoginService.isEnabled
         do {
             try launchAtLoginService.setEnabled(value)
-            launchAtLogin = launchAtLoginService.isEnabled
-            preferences.launchAtLogin = launchAtLogin
-            try preferencesStore.save(preferences)
         } catch {
             launchAtLogin = launchAtLoginService.isEnabled
+            errorMessage = "Unable to update Launch at Login."
             throw error
         }
+
+        let actualState = launchAtLoginService.isEnabled
+        var candidate = preferences
+        candidate.launchAtLogin = actualState
+        do {
+            try preferencesStore.save(candidate)
+        } catch {
+            do {
+                try launchAtLoginService.setEnabled(previousServiceState)
+            } catch {
+                // Preserve the framework-reported state if rollback is unavailable.
+            }
+            launchAtLogin = launchAtLoginService.isEnabled
+            errorMessage = "Unable to save settings."
+            throw error
+        }
+
+        preferences = candidate
+        launchAtLogin = actualState
+        errorMessage = nil
     }
 
     func logout() async {
         await logoutAction()
     }
 
-    private func persistPreferences() {
-        do {
-            try preferencesStore.save(preferences)
-            errorMessage = nil
-        } catch {
-            errorMessage = "Unable to save settings."
-        }
+    private func restorePersistedRefreshInterval() {
+        refreshPreset = persistedRefreshPreset
+        customInterval = persistedCustomInterval
+        refreshUnit = persistedRefreshUnit
     }
 
     private static func preset(for seconds: TimeInterval) -> RefreshIntervalPreset {

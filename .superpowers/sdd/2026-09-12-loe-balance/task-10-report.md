@@ -111,3 +111,41 @@ task-10 harness passed: login validation/cleanup, interval settings, callbacks, 
 - SwiftUI layout, keyboard focus, accessibility presentation, and the live settings window appearance were not visually observed in a running app.
 - Actual `SMAppService.mainApp` registration/unregistration was not exercised; the production adapter is a thin framework wrapper and the harness validates its protocol contract with a fake.
 - The Task 11 coordinator must wire the view models' callbacks, scheduler, and logout action into the application lifecycle.
+
+## Fix Round 1
+
+Base: `55a623d`
+
+### Findings Addressed
+
+- Added an early `isSubmitting` guard before validation, error mutation, password copying, or the `AuthManager` request. The focused test and harness use an actor-gated login to prove a concurrent second submit leaves state unchanged and does not issue a second request.
+- Converted shake, desktop-card, interval, and launch-at-login updates to candidate-first persistence. Failed saves retain the prior internal and published state, suppress callbacks/scheduler updates, expose a compact error, and restore the launch service when necessary.
+- Added persisted refresh-control snapshots for selection, custom value, and unit rollback. `SettingsView` now uses explicit `do/catch` task handling for interval apply and launch toggles; failures remain visible through `errorMessage` rather than being swallowed by `try?`.
+
+### TDD Evidence
+
+The regression tests and deterministic harness assertions were added before the production fixes. Per the fix-round instruction, no XCTest command was run.
+
+### Verification
+
+Allowed commands:
+
+```sh
+swift build
+./.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-10/run-harness.sh
+git diff --check
+```
+
+The first combined build/harness attempt exposed only Swift initialization-order diagnostics for the persisted refresh-control fields. After correcting the initializer with local values, the final combined run exited 0:
+
+```text
+Build complete! (3.46s)
+task-10 harness passed: login validation/cleanup, interval settings, callbacks, launch rollback, logout
+```
+
+`git diff --check` produced no output.
+
+### Fix-Round Concerns
+
+- XCTest remains unavailable and was intentionally not retried in this fix round.
+- The harness proves deterministic view-model transactions and rollback, but does not exercise a live SwiftUI binding event loop or actual framework registration in `SMAppService.mainApp`.

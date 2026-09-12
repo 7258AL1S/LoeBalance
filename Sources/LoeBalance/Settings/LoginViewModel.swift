@@ -17,6 +17,7 @@ final class LoginViewModel: ObservableObject {
     }
 
     func submit() async {
+        guard !isSubmitting else { return }
         errorMessage = nil
         guard Self.isValidEmail(email) else {
             errorMessage = "Enter a valid email address."

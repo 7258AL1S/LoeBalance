@@ -110,3 +110,4 @@ Task 9: fix round 1/5 (2 addressed, 0 open — instance-specific 54x42 status st
 Task 9: complete (commit dbf745b; swift build and warnings-as-errors harness passed; focused XCTest blocked by missing XCTest module; tracked worktree clean)
 Task 9: final review clean (2026-09-12; Critical 0, Important 0; verification-hardening tests committed in 3cea1e9 and dbf745b; no further XCTest wait requested; Minor balance-width ceiling deferred to integration QA)
 Task 10: complete (base 3cea1e9; login/settings/launch-at-login source, focused tests, and warnings-as-errors harness implemented; XCTest unavailable, build/harness/diff clean)
+Task 10: fix round 1/5 (3 addressed, 0 open — concurrent submit guard, candidate-first settings transactions, visible UI rollback/error handling; build/harness/diff clean; XCTest not rerun)
