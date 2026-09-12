@@ -106,3 +106,110 @@ extension URLRequest {
         return data
     }
 }
+
+actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
+actor FakeAPIClient: APIClientProtocol {
+    struct LoginCall: Equatable, Sendable {
+        let email: String
+        let password: String
+    }
+
+    private let loginSession: AuthSession
+    private var refreshResults: [Result<AuthSession, AppError>]
+    private let refreshStarted: AsyncGate?
+    private let refreshGate: AsyncGate?
+
+    private(set) var receivedLogin: LoginCall?
+    private(set) var receivedRefreshTokens: [String] = []
+
+    init(
+        session: AuthSession = .fixture,
+        refreshResults: [Result<AuthSession, AppError>] = [.success(.fixture)],
+        refreshStarted: AsyncGate? = nil,
+        refreshGate: AsyncGate? = nil
+    ) {
+        loginSession = session
+        self.refreshResults = refreshResults
+        self.refreshStarted = refreshStarted
+        self.refreshGate = refreshGate
+    }
+
+    var refreshCallCount: Int {
+        receivedRefreshTokens.count
+    }
+
+    func login(email: String, password: String) async throws -> AuthSession {
+        receivedLogin = LoginCall(email: email, password: password)
+        return loginSession
+    }
+
+    func refresh(refreshToken: String) async throws -> AuthSession {
+        receivedRefreshTokens.append(refreshToken)
+        await refreshStarted?.open()
+        await refreshGate?.wait()
+        guard !refreshResults.isEmpty else {
+            throw AppError.invalidResponse
+        }
+        return try refreshResults.removeFirst().get()
+    }
+
+    func fetchCurrentUser(accessToken: String) async throws -> CurrentUserDTO {
+        throw AppError.invalidResponse
+    }
+
+    func fetchDashboardStats(accessToken: String) async throws -> DashboardStatsDTO {
+        throw AppError.invalidResponse
+    }
+
+    func fetchUsage(accessToken: String, pageSize: Int) async throws -> [UsageRecord] {
+        throw AppError.invalidResponse
+    }
+}
+
+final class InMemoryCredentialStore: CredentialStoreProtocol, @unchecked Sendable {
+    private let stored: LockedBox<StoredCredential?>
+    private let deletionCount = LockedBox(0)
+
+    init(_ credential: StoredCredential? = nil) {
+        stored = LockedBox(credential)
+    }
+
+    var saved: StoredCredential? {
+        stored.value
+    }
+
+    var deleteCount: Int {
+        deletionCount.value
+    }
+
+    func load() throws -> StoredCredential? {
+        stored.value
+    }
+
+    func save(_ credential: StoredCredential) throws {
+        stored.set(credential)
+    }
+
+    func delete() throws {
+        stored.set(nil)
+        deletionCount.update { $0 += 1 }
+    }
+}
