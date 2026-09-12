@@ -1,0 +1,129 @@
+import AppKit
+import Foundation
+import XCTest
+@testable import LoeBalance
+
+@MainActor
+final class DesktopCardControllerTests: XCTestCase {
+    func testPanelUsesDesktopLayerPolicyAndFixedContentSize() {
+        let store = DesktopCardPreferencesStore()
+        let controller = DesktopCardController(preferencesStore: store)
+        let panel = controller.panel
+
+        XCTAssertTrue(panel.styleMask.contains(.borderless))
+        XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertFalse(panel.isOpaque)
+        XCTAssertEqual(panel.backgroundColor, .clear)
+        XCTAssertFalse(panel.hidesOnDeactivate)
+        XCTAssertTrue(panel.isMovableByWindowBackground)
+        XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(panel.collectionBehavior.contains(.stationary))
+        XCTAssertTrue(panel.collectionBehavior.contains(.ignoresCycle))
+        XCTAssertGreaterThan(panel.level.rawValue, Int(CGWindowLevelForKey(.desktopWindow)))
+        XCTAssertLessThan(panel.level.rawValue, NSWindow.Level.normal.rawValue)
+        XCTAssertEqual(panel.contentView?.bounds.size, DesktopCardView.fixedSize)
+        XCTAssertEqual(controller.cardView.layer?.cornerRadius, 8)
+    }
+
+    func testPresentUpdatesAllFieldsWithoutChangingPanelFrame() {
+        let store = DesktopCardPreferencesStore()
+        let controller = DesktopCardController(preferencesStore: store)
+        controller.panel.setFrame(NSRect(x: 120, y: 240, width: 326, height: 218), display: false)
+        let frameBeforePresentation = controller.panel.frame
+        let snapshot = BalanceSnapshot(
+            balance: Money(decimal: 19.08),
+            todaySpend: Money(decimal: 2.34),
+            todayRequests: 17,
+            updatedAt: .fixtureNow
+        )
+
+        controller.present(snapshot: snapshot, connection: .offline)
+
+        let title = controller.cardView.titleLabel.stringValue
+        let balance = controller.cardView.balanceLabel.stringValue
+        let spend = controller.cardView.todaySpendLabel.stringValue
+        let requests = controller.cardView.todayRequestsLabel.stringValue
+        let update = controller.cardView.lastUpdateLabel.stringValue
+        let connection = controller.cardView.connectionIndicator.accessibilityValue() as? String
+        XCTAssertEqual(title, "LoeBalance")
+        XCTAssertEqual(balance, "$19.08")
+        XCTAssertEqual(spend, "$2.34")
+        XCTAssertEqual(requests, "17")
+        XCTAssertTrue(update.contains("Updated"))
+        XCTAssertEqual(connection, "Offline")
+        XCTAssertEqual(controller.panel.frame, frameBeforePresentation)
+    }
+
+    func testRestoredFrameIsClampedAndWindowMovePersistsFrame() throws {
+        let visibleFrame = CGRect(x: 0, y: 0, width: 1_000, height: 700)
+        let store = DesktopCardPreferencesStore(
+            preferences: AppPreferences(desktopFrame: CGRect(x: 900, y: 650, width: 326, height: 218))
+        )
+        let controller = DesktopCardController(
+            preferencesStore: store,
+            visibleFrameProvider: { _ in visibleFrame }
+        )
+
+        XCTAssertEqual(controller.panel.frame, CGRect(x: 674, y: 482, width: 326, height: 218))
+
+        let movedFrame = CGRect(x: 200, y: 300, width: 326, height: 218)
+        controller.panel.setFrame(movedFrame, display: false)
+        controller.windowDidMove(Notification(name: NSWindow.didMoveNotification, object: controller.panel))
+
+        let saved = try XCTUnwrap(store.savedPreferences?.desktopFrame)
+        XCTAssertEqual(saved, movedFrame)
+    }
+
+    func testClampingKeepsFixedCardOriginInsideUndersizedVisibleFrame() {
+        let visibleFrame = CGRect(x: 50, y: 60, width: 200, height: 100)
+
+        let clamped = DesktopCardController.clampedFrame(
+            CGRect(x: 900, y: 650, width: 640, height: 480),
+            to: visibleFrame
+        )
+
+        XCTAssertEqual(clamped, CGRect(x: 50, y: 60, width: 326, height: 218))
+    }
+
+    func testPlayPlacesDamageBesideBalanceAndHonorsShakeStrengthAndReduceMotion() {
+        let store = DesktopCardPreferencesStore()
+        let controller = DesktopCardController(preferencesStore: store)
+        let event = BalanceAnimationEvent.debit(.cents(25))
+
+        controller.play(events: [event], shake: .strong, reduceMotion: false)
+
+        let streamFrame = controller.cardView.damageStreamView.frame
+        let balanceFrame = controller.cardView.balanceLabel.frame
+        let streamPositionAnimation = controller.cardView.damageStreamView.layer?.sublayers?.first?.animation(forKey: "damage.position")
+        let shakeAnimation = controller.cardView.layer?.animation(forKey: "desktop-card.shake")
+        XCTAssertGreaterThan(balanceFrame.width, 0)
+        XCTAssertGreaterThan(streamFrame.width, 0)
+        XCTAssertGreaterThanOrEqual(streamFrame.minX, balanceFrame.maxX)
+        XCTAssertNotNil(streamPositionAnimation)
+        XCTAssertNotNil(shakeAnimation)
+
+        controller.play(events: [event], shake: .off, reduceMotion: false)
+        let offShakeAnimation = controller.cardView.layer?.animation(forKey: "desktop-card.shake")
+        XCTAssertNil(offShakeAnimation)
+
+        controller.play(events: [event], shake: .strong, reduceMotion: true)
+        let reducedShakeAnimation = controller.cardView.layer?.animation(forKey: "desktop-card.shake")
+        XCTAssertNil(reducedShakeAnimation)
+    }
+}
+
+private final class DesktopCardPreferencesStore: PreferencesStoreProtocol {
+    private var preferences: AppPreferences?
+
+    init(preferences: AppPreferences? = nil) {
+        self.preferences = preferences
+    }
+
+    var savedPreferences: AppPreferences? { preferences }
+
+    func load() throws -> AppPreferences? { preferences }
+
+    func save(_ preferences: AppPreferences) throws {
+        self.preferences = preferences
+    }
+}
