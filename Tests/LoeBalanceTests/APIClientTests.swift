@@ -32,7 +32,7 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(object, ["email": "user@example.com", "password": "secret123"])
     }
 
-    func testRefreshSendsRefreshTokenAndUsesAccessTokenSubjectForUserID() async throws {
+    func testRefreshUsesReturnedUserID() async throws {
         let capturedRequest = LockedBox<URLRequest?>(nil)
         let capturedBody = LockedBox<Data?>(nil)
         URLProtocolStub.install { request in
@@ -40,7 +40,7 @@ final class APIClientTests: XCTestCase {
             capturedBody.set(try request.bodyData())
             return Self.response(
                 for: request,
-                json: #"{"code":0,"data":{"access_token":"eyJhbGciOiJub25lIn0.eyJzdWIiOiI0MiJ9.","refresh_token":"rotated-token","expires_in":900,"token_type":"Bearer"},"message":"ok"}"#
+                json: #"{"code":0,"data":{"access_token":"opaque-access-token","refresh_token":"rotated-token","expires_in":900,"token_type":"Bearer","user":{"id":84}},"message":"ok"}"#
             )
         }
 
@@ -48,13 +48,29 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertEqual(session.refreshToken, "rotated-token")
         XCTAssertEqual(session.expiresAt, .fixtureNow.addingTimeInterval(900))
-        XCTAssertEqual(session.userID, 42)
+        XCTAssertEqual(session.userID, 84)
         let request = try XCTUnwrap(capturedRequest.value)
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.url?.absoluteString, "https://api.loe.cx/api/v1/auth/refresh")
         let body = try XCTUnwrap(capturedBody.value)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
         XCTAssertEqual(object, ["refresh_token": "refresh-token"])
+    }
+
+    func testRefreshWithoutUserAcceptsOpaqueTokenAndReturnsNilUserID() async throws {
+        URLProtocolStub.install { request in
+            Self.response(
+                for: request,
+                json: #"{"code":0,"data":{"access_token":"opaque-access-token","refresh_token":"rotated-token","expires_in":900},"message":"ok"}"#
+            )
+        }
+
+        let session = try await makeClient().refresh(refreshToken: "refresh-token")
+
+        XCTAssertEqual(session.accessToken, "opaque-access-token")
+        XCTAssertEqual(session.refreshToken, "rotated-token")
+        XCTAssertEqual(session.expiresAt, .fixtureNow.addingTimeInterval(900))
+        XCTAssertNil(session.userID)
     }
 
     func testAuthenticatedGETRequestsIncludeRequiredHeaders() async throws {
@@ -137,6 +153,19 @@ final class APIClientTests: XCTestCase {
         }
     }
 
+    func testNonzeroEnvelopeIgnoresIncompatibleNonNullErrorData() async {
+        URLProtocolStub.install { request in
+            Self.response(
+                for: request,
+                json: #"{"code":4008,"data":{"unexpected":true},"message":"quota unavailable"}"#
+            )
+        }
+
+        await assertError(.apiEnvelope(code: 4008, message: "quota unavailable")) {
+            try await self.makeClient().fetchCurrentUser(accessToken: "access-token")
+        }
+    }
+
     func testHTTP401MapsToUnauthorized() async {
         URLProtocolStub.install { request in
             Self.response(for: request, status: 401, json: #"{"code":401,"message":"expired","data":null}"#)
@@ -168,6 +197,16 @@ final class APIClientTests: XCTestCase {
         }
 
         await assertError(.invalidResponse) {
+            try await self.makeClient().fetchCurrentUser(accessToken: "access-token")
+        }
+    }
+
+    func testURLErrorMapsToTransportError() async {
+        URLProtocolStub.install { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+
+        await assertError(.transport(URLError(.notConnectedToInternet))) {
             try await self.makeClient().fetchCurrentUser(accessToken: "access-token")
         }
     }

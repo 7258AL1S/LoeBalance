@@ -26,11 +26,7 @@ struct APIClient: APIClientProtocol, Sendable {
     func refresh(refreshToken: String) async throws -> AuthSession {
         let body = try encode(RefreshRequestDTO(refreshToken: refreshToken))
         let response: AuthResponseDTO = try await request(path: "/auth/refresh", method: "POST", body: body)
-        let userID = response.user?.id ?? Self.userID(fromAccessToken: response.accessToken)
-        guard let userID else {
-            throw AppError.invalidResponse
-        }
-        return makeSession(from: response, userID: userID)
+        return makeSession(from: response, userID: response.user?.id)
     }
 
     func fetchCurrentUser(accessToken: String) async throws -> CurrentUserDTO {
@@ -54,7 +50,7 @@ struct APIClient: APIClientProtocol, Sendable {
         return page.items
     }
 
-    private func makeSession(from response: AuthResponseDTO, userID: Int64) -> AuthSession {
+    private func makeSession(from response: AuthResponseDTO, userID: Int64?) -> AuthSession {
         AuthSession(
             accessToken: response.accessToken,
             refreshToken: response.refreshToken,
@@ -115,14 +111,22 @@ struct APIClient: APIClientProtocol, Sendable {
             throw AppError.serverStatus(httpResponse.statusCode)
         }
 
-        let envelope: APIEnvelope<Response>
+        let decoder = Self.makeDecoder()
+        let metadata: APIEnvelopeMetadata
         do {
-            envelope = try Self.makeDecoder().decode(APIEnvelope<Response>.self, from: data)
+            metadata = try decoder.decode(APIEnvelopeMetadata.self, from: data)
         } catch {
             throw AppError.invalidResponse
         }
-        guard envelope.code == 0 else {
-            throw AppError.apiEnvelope(code: envelope.code, message: envelope.message ?? "")
+        guard metadata.code == 0 else {
+            throw AppError.apiEnvelope(code: metadata.code, message: metadata.message ?? "")
+        }
+
+        let envelope: APIEnvelope<Response>
+        do {
+            envelope = try decoder.decode(APIEnvelope<Response>.self, from: data)
+        } catch {
+            throw AppError.invalidResponse
         }
         guard let payload = envelope.data else {
             throw AppError.invalidResponse
@@ -186,27 +190,6 @@ struct APIClient: APIClientProtocol, Sendable {
         return decoder
     }
 
-    private static func userID(fromAccessToken token: String) -> Int64? {
-        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
-        guard segments.count >= 2 else {
-            return nil
-        }
-        var payload = String(segments[1])
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
-        guard let data = Data(base64Encoded: payload),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        if let subject = object["sub"] as? String {
-            return Int64(subject)
-        }
-        if let subject = object["sub"] as? NSNumber {
-            return subject.int64Value
-        }
-        return nil
-    }
 }
 
 private extension String {

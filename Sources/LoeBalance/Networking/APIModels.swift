@@ -4,7 +4,7 @@ struct AuthSession: Codable, Equatable, Sendable {
     let accessToken: String
     let refreshToken: String
     let expiresAt: Date
-    let userID: Int64
+    let userID: Int64?
 }
 
 struct CurrentUserDTO: Codable, Equatable, Sendable {
@@ -34,6 +34,11 @@ protocol APIClientProtocol: Sendable {
 struct APIEnvelope<Payload: Decodable>: Decodable {
     let code: Int
     let data: Payload?
+    let message: String?
+}
+
+struct APIEnvelopeMetadata: Decodable {
+    let code: Int
     let message: String?
 }
 
