@@ -46,12 +46,12 @@ struct PersistedSnapshotState: Codable, Equatable, Sendable {
     }
 }
 
-protocol SnapshotStoreProtocol {
+protocol SnapshotStoreProtocol: Sendable {
     func load() throws -> PersistedSnapshotState?
     func save(_ state: PersistedSnapshotState) throws
 }
 
-struct UserDefaultsSnapshotStore: SnapshotStoreProtocol {
+struct UserDefaultsSnapshotStore: @unchecked Sendable, SnapshotStoreProtocol {
     private let userDefaults: UserDefaults
     private let key = "LoeBalance.snapshotState"
 
