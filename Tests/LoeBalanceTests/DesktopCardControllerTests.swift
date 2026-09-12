@@ -128,6 +128,40 @@ final class DesktopCardControllerTests: XCTestCase {
         )
     }
 
+    func testLargeBalancesFitAtReadableMonospacedSizeWithoutMovingDamageStream() throws {
+        let controller = DesktopCardController(preferencesStore: DesktopCardPreferencesStore())
+        controller.cardView.layoutSubtreeIfNeeded()
+        let balanceFrame = controller.cardView.balanceLabel.frame
+        let damageFrame = controller.cardView.damageStreamView.frame
+        let cases = [
+            ("1000000", "$1,000,000.00"),
+            ("987654321.09", "$987,654,321.09")
+        ]
+
+        for (decimalText, expectedCurrencyText) in cases {
+            let decimal = try XCTUnwrap(Decimal(string: decimalText, locale: Locale(identifier: "en_US_POSIX")))
+            controller.present(
+                snapshot: BalanceSnapshot(
+                    balance: Money(decimal: decimal),
+                    todaySpend: nil,
+                    todayRequests: nil,
+                    updatedAt: .fixtureNow
+                ),
+                connection: .online
+            )
+            controller.cardView.layoutSubtreeIfNeeded()
+
+            let label = controller.cardView.balanceLabel
+            let font = try XCTUnwrap(label.font)
+            XCTAssertEqual(label.stringValue, expectedCurrencyText)
+            XCTAssertLessThanOrEqual(renderedTextWidth(of: label), label.bounds.width)
+            XCTAssertGreaterThanOrEqual(font.pointSize, 14)
+            XCTAssertEqual(renderedWidth(of: "1111", font: font), renderedWidth(of: "8888", font: font), accuracy: 0.01)
+            XCTAssertEqual(label.frame, balanceFrame)
+            XCTAssertEqual(controller.cardView.damageStreamView.frame, damageFrame)
+        }
+    }
+
     func testPlayPlacesDamageBesideBalanceAndHonorsShakeStrengthAndReduceMotion() {
         let store = DesktopCardPreferencesStore()
         let controller = DesktopCardController(preferencesStore: store)
@@ -161,6 +195,10 @@ final class DesktopCardControllerTests: XCTestCase {
 
     private func renderedTextWidth(of label: NSTextField) -> CGFloat {
         label.attributedStringValue.size().width
+    }
+
+    private func renderedWidth(of text: String, font: NSFont) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: font]).width
     }
 }
 

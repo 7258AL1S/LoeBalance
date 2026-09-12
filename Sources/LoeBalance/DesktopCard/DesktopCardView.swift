@@ -207,7 +207,7 @@ final class DesktopCardView: NSView {
         fitSingleLineText(
             in: balanceLabel,
             preferredSize: 30,
-            minimumSize: 20,
+            minimumSize: 14,
             font: { .monospacedDigitSystemFont(ofSize: $0, weight: .semibold) }
         )
     }
