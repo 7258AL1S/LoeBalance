@@ -77,4 +77,43 @@ public sealed class TaskbarBalanceGeometryTests
         Assert.True(placed.Right <= fallback.X);
         Assert.True(placed.X > BottomTaskbar.X);
     }
+
+    [Fact]
+    public void ReadoutWindowReservesTheAnimationStripAndSharesThePillCentre()
+    {
+        var pill = TaskbarBalanceGeometry.Place(
+            BottomTaskbar,
+            BottomTray,
+            width: 60,
+            height: TaskbarBalanceGeometry.PillHeight,
+            TaskbarEdge.Bottom);
+
+        var window = TaskbarBalanceGeometry.ReadoutWindow(pill, TaskbarBalanceGeometry.ReadoutWindowHeight);
+
+        Assert.Equal(pill.Width + TaskbarBalanceGeometry.DamageAreaWidth, window.Width);
+        Assert.Equal(TaskbarBalanceGeometry.ReadoutWindowHeight, window.Height);
+        Assert.Equal(pill.Y + (pill.Height / 2), window.Y + (window.Height / 2));
+        Assert.Equal(54, TaskbarBalanceGeometry.DamageAreaWidth);
+        Assert.True(window.Y < pill.Y);
+    }
+
+    [Fact]
+    public void WholeReadoutStaysClearOfTheNotificationArea()
+    {
+        const double pillWidth = 74;
+        var totalWidth = pillWidth + TaskbarBalanceGeometry.DamageAreaWidth;
+
+        var windowFrame = TaskbarBalanceGeometry.Place(
+            BottomTaskbar,
+            BottomTray,
+            totalWidth,
+            TaskbarBalanceGeometry.PillHeight,
+            TaskbarEdge.Bottom);
+
+        // Pill plus strip must end before the tray/clock block, otherwise the floating
+        // numbers would cover the tray icons and the overflow chevron.
+        Assert.True(windowFrame.Right <= BottomTray.X);
+        Assert.Equal(8, BottomTray.X - windowFrame.Right);
+        Assert.True(windowFrame.X > BottomTaskbar.X);
+    }
 }

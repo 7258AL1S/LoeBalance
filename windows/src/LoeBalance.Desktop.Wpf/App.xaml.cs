@@ -26,7 +26,9 @@ public partial class App : System.Windows.Application
         _coordinator = new AppCoordinator();
         _ = e.Args.Contains("--preview-card", StringComparer.OrdinalIgnoreCase)
             ? _coordinator.StartPreviewAsync()
-            : _coordinator.StartAsync();
+            : e.Args.Contains("--preview-settings", StringComparer.OrdinalIgnoreCase)
+                ? _coordinator.StartSettingsPreviewAsync()
+                : _coordinator.StartAsync();
     }
 
     protected override void OnExit(ExitEventArgs e)

@@ -184,7 +184,25 @@ internal sealed class AppCoordinator : IDisposable
     }
 
     private void PlayPreviewBurst(IReadOnlyList<BalanceAnimationEvent> events)
-        => _card.Play(_planner.Plan(events, DamageSurface.Desktop, _preferences.ShakeStrength, ReduceMotion()));
+    {
+        _card.Play(_planner.Plan(events, DamageSurface.Desktop, _preferences.ShakeStrength, ReduceMotion()));
+        _taskbarReadout.Play(_planner.Plan(events, DamageSurface.MenuBar, ShakeStrength.Off, ReduceMotion()));
+    }
+
+    /// <summary>
+    /// Diagnostic entry point used by <c>--preview-settings</c>: opens the settings window
+    /// without requiring a session so the layout can be checked on a real desktop.
+    /// </summary>
+    internal async Task StartSettingsPreviewAsync()
+    {
+        await LoadStateAsync();
+        _authenticated = true;
+        var window = CreateSettingsWindow();
+        window.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow = window;
+        await window.InitializeAsync();
+        window.Present();
+    }
 
     private async Task<RefreshResult> RefreshAsync(CancellationToken cancellationToken)
     {
@@ -214,10 +232,14 @@ internal sealed class AppCoordinator : IDisposable
         _tray.Present(result.Snapshot, result.ConnectionState, _preferences.ShowsDesktopCard);
         _taskbarReadout.Present(result.Snapshot, result.ConnectionState);
 
-        // Only the desktop card animates. The tray reports state through icon and tooltip;
-        // it never carries floating debit numbers.
+        // The desktop card uses the desktop track: full travel plus the configured shake.
         var plans = _planner.Plan(result.Events, DamageSurface.Desktop, _preferences.ShakeStrength, ReduceMotion());
         _card.Play(plans);
+
+        // The taskbar readout mirrors the macOS status item: the same events on the menu-bar
+        // track (shorter travel, never any shake) inside its reserved 54 point strip. The
+        // notification-area icon itself still carries no floating numbers.
+        _taskbarReadout.Play(_planner.Plan(result.Events, DamageSurface.MenuBar, ShakeStrength.Off, ReduceMotion()));
     }
 
     private void HandleRefreshFailure(Exception exception)

@@ -120,6 +120,10 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetCursorPos(out Point point);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool ScreenToClient(IntPtr hWnd, ref Point point);
+
     [DllImport("shell32.dll", SetLastError = true)]
     internal static extern uint SHAppBarMessage(int message, ref AppBarData data);
 

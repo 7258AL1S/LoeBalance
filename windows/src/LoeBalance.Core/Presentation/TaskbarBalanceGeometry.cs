@@ -24,6 +24,35 @@ public static class TaskbarBalanceGeometry
 {
     public const double DefaultGap = 8;
 
+    /// <summary>Height of the balance pill, matching the tray row height at 100% scaling.</summary>
+    public const double PillHeight = 24;
+
+    /// <summary>
+    /// Width of the animation strip reserved to the right of the balance. The macOS status item
+    /// reserves the same 54 points so debit/credit numbers have room to float without moving
+    /// the balance text.
+    /// </summary>
+    public const double DamageAreaWidth = 54;
+
+    /// <summary>
+    /// Height of the readout window: the pill plus enough room above it for the highest
+    /// planned rise (menu-bar surface, 55 points) and the text height.
+    /// </summary>
+    public const double ReadoutWindowHeadroom = 63;
+
+    public static double ReadoutWindowHeight => ReadoutWindowHeadroom * 2;
+
+    /// <summary>
+    /// Wraps the pill in a window that is vertically centred on the pill, so the damage track
+    /// shares the pill's centre line and the numbers rise into the space above the taskbar.
+    /// </summary>
+    public static ScreenRect ReadoutWindow(ScreenRect pill, double windowHeight, double damageAreaWidth = DamageAreaWidth)
+        => new(
+            pill.X,
+            pill.Y + (pill.Height / 2) - (windowHeight / 2),
+            pill.Width + damageAreaWidth,
+            windowHeight);
+
     public static ScreenRect Place(
         ScreenRect taskbar,
         ScreenRect tray,

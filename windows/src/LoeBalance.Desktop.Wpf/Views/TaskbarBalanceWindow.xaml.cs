@@ -3,6 +3,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using LoeBalance.Core.Animation;
 using LoeBalance.Core.Models;
 using LoeBalance.Core.Presentation;
 using LoeBalance.Desktop.Wpf.Interop;
@@ -27,8 +28,13 @@ public partial class TaskbarBalanceWindow : Window, IDisposable
 {
     private const double DotWidth = 7;
     private const double DotMargin = 5;
-    private const double HorizontalPadding = 14;
-    private const double MinimumWidth = 54;
+    private const double HorizontalPadding = 14;   // 7 left + 7 right
+    private const double PillBorderThickness = 2;       // 1px on each side
+    private const double TextSlack = 6;             // absorbs glyph side bearings and rounding
+    private const double MinimumPillWidth = 54;
+    private const int WmNcHitTest = 0x0084;
+    private const int HtClient = 1;
+    private const int HtTransparent = -1;
 
     private readonly DispatcherTimer _layoutTimer;
     private readonly Action _openMenu;
@@ -38,6 +44,7 @@ public partial class TaskbarBalanceWindow : Window, IDisposable
     private bool _visible;
     private bool _disposed;
     private bool _hiddenForFullScreen;
+    private double _pillWidth = MinimumPillWidth;
 
     internal TaskbarBalanceWindow(Action openMenu)
     {
@@ -51,8 +58,11 @@ public partial class TaskbarBalanceWindow : Window, IDisposable
 
         SourceInitialized += OnSourceInitialized;
         MouseLeftButtonUp += OnMouseLeftButtonUp;
+        SizeChanged += (_, _) => _damageAreaHeight = DamageStream.ActualHeight;
         Present(new BalanceSnapshot(Money.Zero, null, null, DateTimeOffset.Now), new ConnectionState.Online());
     }
+
+    private double _damageAreaHeight;
 
     public void Present(BalanceSnapshot snapshot, ConnectionState connection)
     {
@@ -64,6 +74,16 @@ public partial class TaskbarBalanceWindow : Window, IDisposable
             $"{snapshot.Balance.CurrencyText} · {ConnectionPresentation.Text(connection)} · Updated {snapshot.UpdatedAt.ToLocalTime():HH:mm:ss}";
         ResizeToContent();
         RefreshPlacement();
+    }
+
+    /// <summary>
+    /// Plays the debit/credit stream in the reserved strip. The stream never shakes and stays
+    /// clipped to its own column, so the balance text and the pill never move.
+    /// </summary>
+    public void Play(IReadOnlyList<DamageMotionPlan> plans)
+    {
+        if (plans.Count == 0) return;
+        DamageStream.Play(plans);
     }
 
     public void SetVisible(bool visible)
@@ -120,6 +140,20 @@ public partial class TaskbarBalanceWindow : Window, IDisposable
             handled = true;
             return new IntPtr(NativeMethods.MaNoActivate);
         }
+
+        if (message == WmNcHitTest)
+        {
+            // The window is tall so the numbers can float above the taskbar, but only the pill
+            // may swallow mouse input; everything else passes through to whatever is behind.
+            var point = new NativeMethods.Point((short)(lParam.ToInt64() & 0xFFFF), (short)((lParam.ToInt64() >> 16) & 0xFFFF));
+            NativeMethods.ScreenToClient(hwnd, ref point);
+            var pillTop = (Height - TaskbarBalanceGeometry.PillHeight) / 2;
+            var insidePill = point.X >= 0 && point.X <= _pillWidth
+                && point.Y >= pillTop && point.Y <= pillTop + TaskbarBalanceGeometry.PillHeight;
+            handled = true;
+            return new IntPtr(insidePill ? HtClient : HtTransparent);
+        }
+
         return IntPtr.Zero;
     }
 
@@ -131,23 +165,18 @@ public partial class TaskbarBalanceWindow : Window, IDisposable
 
     private void ResizeToContent()
     {
-        var textWidth = Measure(BalanceText.Text);
-        Width = Math.Max(MinimumWidth, HorizontalPadding + DotWidth + DotMargin + textWidth);
-        Height = 24;
-    }
+        // Measure with WPF itself instead of estimating, so the last glyph is never clipped.
+        BalanceText.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var textWidth = BalanceText.DesiredSize.Width;
 
-    private static double Measure(string value)
-    {
-        if (string.IsNullOrEmpty(value)) return 0;
-        var formatted = new FormattedText(
-            value,
-            System.Globalization.CultureInfo.CurrentCulture,
-            System.Windows.FlowDirection.LeftToRight,
-            new Typeface(new System.Windows.Media.FontFamily("Consolas, Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal),
-            12,
-            System.Windows.Media.Brushes.White,
-            1.0);
-        return formatted.Width;
+        _pillWidth = Math.Max(
+            MinimumPillWidth,
+            Math.Ceiling(HorizontalPadding + PillBorderThickness + DotWidth + DotMargin + textWidth + TextSlack));
+
+        ReadoutSurface.Width = _pillWidth;
+        Width = _pillWidth + TaskbarBalanceGeometry.DamageAreaWidth;
+        Height = TaskbarBalanceGeometry.ReadoutWindowHeight;
+        DamageStream.Height = Height;
     }
 
     /// <summary>Recomputes the dock position; also re-asserts topmost so the taskbar stays below.</summary>
@@ -182,7 +211,16 @@ public partial class TaskbarBalanceWindow : Window, IDisposable
             ? ToDip(trayRect, scale)
             : TaskbarBalanceGeometry.FallbackTrayRect(taskbarDip, edge);
 
-        var frame = TaskbarBalanceGeometry.Place(taskbarDip, trayDip, Width, Height, edge);
+        // Solve the position for the whole readout (pill plus animation strip) so the strip
+        // never covers the notification area or its overflow chevron.
+        var windowFrame = TaskbarBalanceGeometry.Place(
+            taskbarDip,
+            trayDip,
+            _pillWidth + TaskbarBalanceGeometry.DamageAreaWidth,
+            TaskbarBalanceGeometry.PillHeight,
+            edge);
+        var pill = new ScreenRect(windowFrame.X, windowFrame.Y, _pillWidth, TaskbarBalanceGeometry.PillHeight);
+        var frame = TaskbarBalanceGeometry.ReadoutWindow(pill, Height);
 
         Left = frame.X;
         Top = frame.Y;
