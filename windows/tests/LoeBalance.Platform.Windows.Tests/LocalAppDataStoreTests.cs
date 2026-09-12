@@ -46,6 +46,20 @@ public sealed class LocalAppDataStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SettingsJsonContainsOnlyPersistedFields()
+    {
+        var store = new LocalAppDataSettingsStore(_directory);
+
+        await store.SaveAsync(new AppPreferences(45, ShakeStrength.Strong, true, false, null));
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(store.SettingsPath));
+        var names = document.RootElement.EnumerateObject().Select(property => property.Name).OrderBy(name => name).ToArray();
+        Assert.Equal(
+            ["desktopCardFrame", "launchAtLogin", "refreshIntervalSeconds", "shakeStrength", "showsDesktopCard"],
+            names);
+    }
+
+    [Fact]
     public async Task MissingAndCorruptSettingsFilesLoadAsNull()
     {
         var store = new LocalAppDataSettingsStore(_directory);

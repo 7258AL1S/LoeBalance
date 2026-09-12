@@ -32,6 +32,8 @@ internal sealed class AppCoordinator : IDisposable
     private readonly TrayPresenter _tray;
     private readonly DesktopCardWindow _card;
     private readonly DamageAnimationPlanner _planner = new();
+    private readonly EventHandler<bool> _networkAvailabilityHandler;
+    private readonly EventHandler _powerResumeHandler;
 
     private AppPreferences _preferences = AppPreferences.Empty;
     private BalanceSnapshot? _currentSnapshot;
@@ -55,6 +57,14 @@ internal sealed class AppCoordinator : IDisposable
             Logout: () => _ = LogoutAsync(),
             Quit: Quit));
         _card = new DesktopCardWindow(null, SaveDesktopCardFrame);
+
+        // Network recovery and system wake must trigger an immediate refresh, and both
+        // monitors raise their events on background threads, so every handler is marshalled
+        // to the dispatcher before it touches the UI.
+        _networkAvailabilityHandler = (_, available) => _ = OnNetworkAvailabilityChangedAsync(available);
+        _powerResumeHandler = (_, _) => _ = OnSystemResumedAsync();
+        _network.AvailabilityChanged += _networkAvailabilityHandler;
+        _power.Resumed += _powerResumeHandler;
     }
 
     private Func<bool> ReduceMotion => static () => !SystemParameters.ClientAreaAnimation;
@@ -108,22 +118,25 @@ internal sealed class AppCoordinator : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        _network.AvailabilityChanged -= _networkAvailabilityHandler;
+        _power.Resumed -= _powerResumeHandler;
         _network.Dispose();
         _power.Dispose();
         _settingsWindow?.Close();
+        _settingsWindow = null;
         _loginWindow?.Close();
+        _loginWindow = null;
         _card.Close();
         _tray.Dispose();
 
-        try
-        {
-            _scheduler.StopAsync().GetAwaiter().GetResult();
-        }
-        catch (Exception)
-        {
-            // Shutdown must not throw.
-        }
+        // Fire and forget: the scheduler's refresh path marshals back to the dispatcher, so
+        // blocking the UI thread here could deadlock during shutdown. Cancelling the loop is
+        // enough because the process is exiting and Dispose runs on the UI thread.
+        Forget(_scheduler.StopAsync());
     }
+
+    private static void Forget(Task task)
+        => task.ContinueWith(static completed => { _ = completed.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
 
     /// <summary>
     /// Diagnostic entry point used by <c>--preview-card</c>. It shows the desktop card with a
@@ -226,9 +239,12 @@ internal sealed class AppCoordinator : IDisposable
 
     private async Task OpenSettingsAsync()
     {
-        _settingsWindow ??= CreateSettingsWindow();
-        await _settingsWindow.InitializeAsync();
-        _settingsWindow.Present();
+        // Recreated on demand: a WPF window cannot be reopened once it has been closed.
+        var window = CreateSettingsWindow();
+        window.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow = window;
+        await window.InitializeAsync();
+        window.Present();
     }
 
     private SettingsWindow CreateSettingsWindow()
@@ -248,11 +264,35 @@ internal sealed class AppCoordinator : IDisposable
         return new SettingsWindow(viewModel);
     }
 
+    /// <summary>
+    /// Creates a fresh login window each time. WPF windows cannot be shown again after they
+    /// are closed, so caching them would break logging back in after a manual close.
+    /// </summary>
     private void ShowLogin()
     {
-        _loginWindow ??= new LoginWindow(new LoginViewModel(_auth, OnLoginSucceeded));
-        _loginWindow.Present();
+        var window = new LoginWindow(new LoginViewModel(_auth, OnLoginSucceeded));
+        window.Closed += (_, _) => _loginWindow = null;
+        _loginWindow = window;
+        window.Present();
     }
+
+    private Task OnNetworkAvailabilityChangedAsync(bool available) => DispatchAsync(() =>
+    {
+        if (!_authenticated) return;
+        if (available)
+        {
+            _ = _scheduler.NetworkBecameAvailableAsync();
+            return;
+        }
+
+        PresentCachedSnapshot(new ConnectionState.Offline());
+        _scheduler.NetworkBecameUnavailable();
+    });
+
+    private Task OnSystemResumedAsync() => DispatchAsync(() =>
+    {
+        if (_authenticated) _ = _scheduler.SystemDidWakeAsync();
+    });
 
     private void OnLoginSucceeded()
     {

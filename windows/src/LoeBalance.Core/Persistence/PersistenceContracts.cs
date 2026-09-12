@@ -41,6 +41,7 @@ public sealed record AppPreferences(
     bool LaunchAtLogin = false,
     DesktopCardFrame? DesktopCardFrame = null)
 {
+    [JsonIgnore]
     public double ClampedRefreshIntervalSeconds => Math.Clamp(RefreshIntervalSeconds, 1, 3600);
 
     public static AppPreferences Empty => new();
