@@ -10,21 +10,24 @@ actor AuthManager {
     private let api: any APIClientProtocol
     private let credentials: any CredentialStoreProtocol
     private let now: @Sendable () -> Date
+    private let refreshWaiterDidArrive: @Sendable () async -> Void
 
     private var activeSession: AuthSession?
     private var inFlightRefresh: Task<AuthSession, Error>?
     private var inFlightRefreshID: Int?
     private var nextRefreshID = 0
-    private var sessionRevision = 0
+    private var authenticationGeneration = 0
 
     init(
         api: any APIClientProtocol,
         credentials: any CredentialStoreProtocol = KeychainCredentialStore(),
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        refreshWaiterDidArrive: @escaping @Sendable () async -> Void = {}
     ) {
         self.api = api
         self.credentials = credentials
         self.now = now
+        self.refreshWaiterDidArrive = refreshWaiterDidArrive
     }
 
     func login(email: String, password: String) async throws {
@@ -59,14 +62,29 @@ actor AuthManager {
         _ operation: @Sendable (String) async throws -> T
     ) async throws -> T {
         let session = try await usableSession()
+        let generation = authenticationGeneration
         do {
             return try await operation(session.accessToken)
         } catch AppError.unauthorized {
+            guard generation == authenticationGeneration else {
+                throw CancellationError()
+            }
+
             let retrySession: AuthSession
             if let current = activeSession, current.accessToken != session.accessToken {
                 retrySession = current
             } else {
-                retrySession = try await refreshActiveSession()
+                do {
+                    retrySession = try await refreshActiveSession()
+                } catch {
+                    guard generation == authenticationGeneration else {
+                        throw CancellationError()
+                    }
+                    throw error
+                }
+            }
+            guard generation == authenticationGeneration else {
+                throw CancellationError()
             }
             return try await operation(retrySession.accessToken)
         }
@@ -92,6 +110,7 @@ actor AuthManager {
 
     private func refreshActiveSession() async throws -> AuthSession {
         if let task = inFlightRefresh, let refreshID = inFlightRefreshID {
+            await refreshWaiterDidArrive()
             return try await awaitRefresh(task, id: refreshID)
         }
         guard let session = activeSession, let userID = session.userID else {
@@ -100,23 +119,24 @@ actor AuthManager {
 
         nextRefreshID += 1
         let refreshID = nextRefreshID
-        let revision = sessionRevision
+        let generation = authenticationGeneration
         let refreshToken = session.refreshToken
         let task = Task<AuthSession, Error> { [api] in
             let refreshed: AuthSession
             do {
                 refreshed = try await api.refresh(refreshToken: refreshToken)
             } catch {
-                try self.failRefresh(forRevision: revision)
+                try self.failRefresh(forGeneration: generation)
             }
             return try self.acceptRefresh(
                 refreshed,
                 expectedUserID: userID,
-                revision: revision
+                generation: generation
             )
         }
         inFlightRefresh = task
         inFlightRefreshID = refreshID
+        await refreshWaiterDidArrive()
         return try await awaitRefresh(task, id: refreshID)
     }
 
@@ -133,13 +153,13 @@ actor AuthManager {
     private func acceptRefresh(
         _ refreshed: AuthSession,
         expectedUserID: Int64,
-        revision: Int
+        generation: Int
     ) throws -> AuthSession {
-        guard revision == sessionRevision else {
-            throw AppError.loginRequired
+        guard generation == authenticationGeneration else {
+            throw CancellationError()
         }
         guard refreshed.userID == nil || refreshed.userID == expectedUserID else {
-            invalidateSession()
+            try invalidateSession()
             throw AppError.loginRequired
         }
 
@@ -154,17 +174,19 @@ actor AuthManager {
                 StoredCredential(refreshToken: verified.refreshToken, userID: expectedUserID)
             )
         } catch {
-            invalidateSession()
-            throw error
+            let saveError = error
+            try invalidateSession()
+            throw saveError
         }
         activeSession = verified
         return verified
     }
 
-    private func failRefresh(forRevision revision: Int) throws -> Never {
-        if revision == sessionRevision {
-            invalidateSession()
+    private func failRefresh(forGeneration generation: Int) throws -> Never {
+        guard generation == authenticationGeneration else {
+            throw CancellationError()
         }
+        try invalidateSession()
         throw AppError.loginRequired
     }
 
@@ -172,20 +194,20 @@ actor AuthManager {
         inFlightRefresh?.cancel()
         inFlightRefresh = nil
         inFlightRefreshID = nil
-        sessionRevision += 1
+        authenticationGeneration += 1
         activeSession = session
     }
 
     private func clearActiveSession() {
-        sessionRevision += 1
+        authenticationGeneration += 1
         activeSession = nil
     }
 
-    private func invalidateSession() {
+    private func invalidateSession() throws {
         inFlightRefresh?.cancel()
         inFlightRefresh = nil
         inFlightRefreshID = nil
         clearActiveSession()
-        try? credentials.delete()
+        try credentials.delete()
     }
 }

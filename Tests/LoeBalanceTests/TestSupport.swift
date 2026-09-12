@@ -1,4 +1,5 @@
 import Foundation
+import Security
 @testable import LoeBalance
 
 final class URLProtocolStub: URLProtocol, @unchecked Sendable {
@@ -126,13 +127,36 @@ actor AsyncGate {
     }
 }
 
+actor AsyncArrivalCounter {
+    private var count = 0
+    private var waiters: [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    func arrive() {
+        count += 1
+        let ready = waiters.filter { count >= $0.target }
+        waiters.removeAll { count >= $0.target }
+        ready.forEach { $0.continuation.resume() }
+    }
+
+    func wait(until target: Int) async {
+        guard count < target else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append((target, continuation))
+        }
+    }
+
+    var arrivalCount: Int {
+        count
+    }
+}
+
 actor FakeAPIClient: APIClientProtocol {
     struct LoginCall: Equatable, Sendable {
         let email: String
         let password: String
     }
 
-    private let loginSession: AuthSession
+    private var loginResults: [Result<AuthSession, AppError>]
     private var refreshResults: [Result<AuthSession, AppError>]
     private let refreshStarted: AsyncGate?
     private let refreshGate: AsyncGate?
@@ -142,11 +166,12 @@ actor FakeAPIClient: APIClientProtocol {
 
     init(
         session: AuthSession = .fixture,
+        loginResults: [Result<AuthSession, AppError>]? = nil,
         refreshResults: [Result<AuthSession, AppError>] = [.success(.fixture)],
         refreshStarted: AsyncGate? = nil,
         refreshGate: AsyncGate? = nil
     ) {
-        loginSession = session
+        self.loginResults = loginResults ?? [.success(session)]
         self.refreshResults = refreshResults
         self.refreshStarted = refreshStarted
         self.refreshGate = refreshGate
@@ -158,7 +183,10 @@ actor FakeAPIClient: APIClientProtocol {
 
     func login(email: String, password: String) async throws -> AuthSession {
         receivedLogin = LoginCall(email: email, password: password)
-        return loginSession
+        guard !loginResults.isEmpty else {
+            throw AppError.invalidResponse
+        }
+        return try loginResults.removeFirst().get()
     }
 
     func refresh(refreshToken: String) async throws -> AuthSession {
@@ -187,9 +215,11 @@ actor FakeAPIClient: APIClientProtocol {
 final class InMemoryCredentialStore: CredentialStoreProtocol, @unchecked Sendable {
     private let stored: LockedBox<StoredCredential?>
     private let deletionCount = LockedBox(0)
+    private let deleteError: AppError?
 
-    init(_ credential: StoredCredential? = nil) {
+    init(_ credential: StoredCredential? = nil, deleteError: AppError? = nil) {
         stored = LockedBox(credential)
+        self.deleteError = deleteError
     }
 
     var saved: StoredCredential? {
@@ -209,7 +239,10 @@ final class InMemoryCredentialStore: CredentialStoreProtocol, @unchecked Sendabl
     }
 
     func delete() throws {
-        stored.set(nil)
         deletionCount.update { $0 += 1 }
+        if let deleteError {
+            throw deleteError
+        }
+        stored.set(nil)
     }
 }
