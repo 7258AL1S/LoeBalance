@@ -165,3 +165,44 @@ task-6 harness passed: immediate, timer/manual sharing, retry-after/fallback, of
 - Stop clears retry deadline and backoff state; restart coverage uses the same scheduler instance.
 - Added fixed-clock executable assertion for a 120-second Retry-After sleep request.
 - Injected refresh closures remain explicitly `@Sendable`; harness output is warning-free.
+
+## Fix Round 3
+
+### Focused XCTest
+
+Command:
+
+```sh
+swift test --filter RefreshSchedulerTests
+```
+
+Result: exit 1 because the current command-line toolchain has no XCTest module:
+
+```text
+error: no such module 'XCTest'
+```
+
+### Build, warnings-as-errors harness, and diff
+
+Commands:
+
+```sh
+swift build
+git diff --check
+./.superpowers/sdd/2026-09-12-loe-balance/harnesses/task-6/run-harness.sh
+```
+
+Results:
+
+```text
+Build complete! (0.33s)
+task-6 harness passed: timer/manual barrier, shared Retry-After deadline, single request
+```
+
+The harness invokes `swiftc -warnings-as-errors`; it completed without warnings. `git diff --check` produced no output.
+
+### Fixes
+
+- Moved normal interval/backoff and Retry-After waiting into the shared in-flight refresh task, so timer/manual/wake/recovery triggers coalesce around one eligible deadline and one request.
+- Added an explicit timer-entry barrier before invoking manual refresh and asserted the closure count remains unchanged while the timer refresh is blocked.
+- Added an executable assertion that manual refresh during a scheduled Retry-After wait produces one post-deadline request.

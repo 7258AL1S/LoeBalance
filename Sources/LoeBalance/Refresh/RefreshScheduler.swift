@@ -92,18 +92,16 @@ actor RefreshScheduler: RefreshScheduling {
 
     private func refreshNow(epoch requestedEpoch: Int) async {
         guard started, requestedEpoch == epoch, isOnline else { return }
-        await performRefresh(epoch: requestedEpoch)
+        await performRefresh(epoch: requestedEpoch, delay: retryDelay())
     }
 
     private func runLoop(epoch loopEpoch: Int) async {
         while !Task.isCancelled && started && epoch == loopEpoch {
-            do {
-                try await sleeper.sleep(for: nextDelay())
-            } catch {
-                return
+            guard isOnline else {
+                do { try await sleeper.sleep(for: interval) } catch { return }
+                continue
             }
-            guard !Task.isCancelled, started, epoch == loopEpoch else { return }
-            if isOnline { await performRefresh(epoch: loopEpoch) }
+            await performRefresh(epoch: loopEpoch, delay: nextDelay())
         }
     }
 
@@ -115,18 +113,15 @@ actor RefreshScheduler: RefreshScheduling {
         return backoffStep == 0 ? interval : [10, 20, 40, 80, 160, 300][min(backoffStep - 1, 5)]
     }
 
-    private func performRefresh(epoch requestedEpoch: Int) async {
+    private func performRefresh(epoch requestedEpoch: Int, delay: TimeInterval) async {
         guard started, requestedEpoch == epoch, isOnline else { return }
         if let inFlightRefresh, inFlightRefresh.epoch == requestedEpoch {
             _ = try? await inFlightRefresh.task.value
             return
         }
 
-        let deadline = retryAfter
-        let task = Task { [now, sleeper, refresh] in
-            if let deadline {
-                try await sleeper.sleep(for: max(0, deadline.timeIntervalSince(now())))
-            }
+        let task = Task { [sleeper, refresh] in
+            if delay > 0 { try await sleeper.sleep(for: delay) }
             return try await refresh()
         }
         inFlightRefresh = (requestedEpoch, task)
@@ -177,6 +172,11 @@ actor RefreshScheduler: RefreshScheduling {
             retryAfter = nil
             backoffStep = min(backoffStep + 1, 6)
         }
+    }
+
+    private func retryDelay() -> TimeInterval {
+        guard let retryAfter else { return 0 }
+        return max(0, retryAfter.timeIntervalSince(now()))
     }
 
     private static func clamp(_ seconds: TimeInterval) -> TimeInterval {
