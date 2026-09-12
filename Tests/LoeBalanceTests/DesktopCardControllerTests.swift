@@ -23,6 +23,8 @@ final class DesktopCardControllerTests: XCTestCase {
         XCTAssertLessThan(panel.level.rawValue, NSWindow.Level.normal.rawValue)
         XCTAssertEqual(panel.contentView?.bounds.size, DesktopCardView.fixedSize)
         XCTAssertEqual(controller.cardView.layer?.cornerRadius, 8)
+        XCTAssertEqual(panel.title, "Sub2API 余额")
+        XCTAssertEqual(panel.accessibilityTitle(), "Sub2API 余额")
     }
 
     func testPresentUpdatesAllFieldsWithoutChangingPanelFrame() {
@@ -45,7 +47,7 @@ final class DesktopCardControllerTests: XCTestCase {
         let requests = controller.cardView.todayRequestsLabel.stringValue
         let update = controller.cardView.lastUpdateLabel.stringValue
         let connection = controller.cardView.connectionIndicator.accessibilityValue() as? String
-        XCTAssertEqual(title, "LoeBalance")
+        XCTAssertEqual(title, "Sub2API 余额")
         XCTAssertEqual(balance, "$19.08")
         XCTAssertEqual(spend, "$2.34")
         XCTAssertEqual(requests, "17")
@@ -74,7 +76,7 @@ final class DesktopCardControllerTests: XCTestCase {
         XCTAssertEqual(saved, movedFrame)
     }
 
-    func testClampingKeepsFixedCardOriginInsideUndersizedVisibleFrame() {
+    func testClampingPreservesTopEdgeInsideUndersizedVisibleFrame() {
         let visibleFrame = CGRect(x: 50, y: 60, width: 200, height: 100)
 
         let clamped = DesktopCardController.clampedFrame(
@@ -82,7 +84,48 @@ final class DesktopCardControllerTests: XCTestCase {
             to: visibleFrame
         )
 
-        XCTAssertEqual(clamped, CGRect(x: 50, y: 60, width: 326, height: 218))
+        XCTAssertEqual(clamped, CGRect(x: 50, y: -58, width: 326, height: 218))
+        XCTAssertEqual(clamped.maxY, visibleFrame.maxY)
+    }
+
+    func testRestoredFrameWithoutVisibleScreenStillUsesFixedCardSize() {
+        let store = DesktopCardPreferencesStore(
+            preferences: AppPreferences(desktopFrame: CGRect(x: 120, y: 240, width: 640, height: 480))
+        )
+
+        let controller = DesktopCardController(
+            preferencesStore: store,
+            visibleFrameProvider: { _ in nil }
+        )
+
+        XCTAssertEqual(controller.panel.frame, CGRect(x: 120, y: 240, width: 326, height: 218))
+    }
+
+    func testLongBalanceAndLoginStatusFitWithoutMovingDamageStream() throws {
+        let controller = DesktopCardController(preferencesStore: DesktopCardPreferencesStore())
+        controller.cardView.layoutSubtreeIfNeeded()
+        let balanceFrame = controller.cardView.balanceLabel.frame
+        let damageFrame = controller.cardView.damageStreamView.frame
+        let snapshot = BalanceSnapshot(
+            balance: Money(decimal: 1_000),
+            todaySpend: nil,
+            todayRequests: nil,
+            updatedAt: .fixtureNow
+        )
+
+        controller.present(snapshot: snapshot, connection: .loginRequired)
+        controller.cardView.layoutSubtreeIfNeeded()
+
+        let balanceLabel = controller.cardView.balanceLabel
+        let statusLabel = try XCTUnwrap(textField(in: controller.cardView, matching: "Sign in required"))
+        XCTAssertLessThanOrEqual(renderedTextWidth(of: balanceLabel), balanceLabel.bounds.width)
+        XCTAssertLessThanOrEqual(renderedTextWidth(of: statusLabel), statusLabel.bounds.width)
+        XCTAssertEqual(balanceLabel.frame, balanceFrame)
+        XCTAssertEqual(controller.cardView.damageStreamView.frame, damageFrame)
+        XCTAssertGreaterThanOrEqual(
+            controller.cardView.damageStreamView.frame.minX,
+            balanceLabel.frame.maxX
+        )
     }
 
     func testPlayPlacesDamageBesideBalanceAndHonorsShakeStrengthAndReduceMotion() {
@@ -109,6 +152,15 @@ final class DesktopCardControllerTests: XCTestCase {
         controller.play(events: [event], shake: .strong, reduceMotion: true)
         let reducedShakeAnimation = controller.cardView.layer?.animation(forKey: "desktop-card.shake")
         XCTAssertNil(reducedShakeAnimation)
+    }
+
+    private func textField(in view: NSView, matching text: String) -> NSTextField? {
+        if let field = view as? NSTextField, field.stringValue == text { return field }
+        return view.subviews.lazy.compactMap { textField(in: $0, matching: text) }.first
+    }
+
+    private func renderedTextWidth(of label: NSTextField) -> CGFloat {
+        label.attributedStringValue.size().width
     }
 }
 

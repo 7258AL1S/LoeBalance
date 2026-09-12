@@ -31,7 +31,8 @@ final class DesktopCardController: NSObject, DesktopCardPresenting, NSWindowDele
         let visibleFrame = visibleFrameProvider(preferredFrame ?? .zero)
         let initialFrame: NSRect
         if let preferredFrame {
-            initialFrame = visibleFrame.map { Self.clampedFrame(preferredFrame, to: $0) } ?? preferredFrame
+            initialFrame = visibleFrame.map { Self.clampedFrame(preferredFrame, to: $0) }
+                ?? NSRect(origin: preferredFrame.origin, size: Self.panelContentSize)
         } else if let visibleFrame {
             initialFrame = Self.defaultFrame(in: visibleFrame)
         } else {
@@ -85,15 +86,26 @@ final class DesktopCardController: NSObject, DesktopCardPresenting, NSWindowDele
     static func clampedFrame(_ frame: CGRect, to visibleFrame: CGRect) -> CGRect {
         let width = Self.panelContentSize.width
         let height = Self.panelContentSize.height
-        let maxX = max(visibleFrame.minX, visibleFrame.maxX - width)
-        let maxY = max(visibleFrame.minY, visibleFrame.maxY - height)
-        let x = min(max(frame.minX, visibleFrame.minX), maxX)
-        let y = min(max(frame.minY, visibleFrame.minY), maxY)
+        let x: CGFloat
+        if visibleFrame.width < width {
+            x = visibleFrame.minX
+        } else {
+            x = min(max(frame.minX, visibleFrame.minX), visibleFrame.maxX - width)
+        }
+
+        let y: CGFloat
+        if visibleFrame.height < height {
+            y = visibleFrame.maxY - height
+        } else {
+            y = min(max(frame.minY, visibleFrame.minY), visibleFrame.maxY - height)
+        }
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
     private func configurePanel() {
         panel.delegate = self
+        panel.title = "Sub2API 余额"
+        panel.setAccessibilityTitle("Sub2API 余额")
         panel.contentView = cardView
         panel.contentView?.frame = NSRect(origin: .zero, size: Self.panelContentSize)
         panel.contentView?.autoresizingMask = [.width, .height]

@@ -4,7 +4,7 @@ import AppKit
 final class DesktopCardView: NSView {
     static let fixedSize = NSSize(width: 326, height: 218)
 
-    let titleLabel = NSTextField(labelWithString: "LoeBalance")
+    let titleLabel = NSTextField(labelWithString: "Sub2API 余额")
     let balanceLabel = NSTextField(labelWithString: "--")
     let todaySpendLabel = NSTextField(labelWithString: "--")
     let todayRequestsLabel = NSTextField(labelWithString: "--")
@@ -33,6 +33,9 @@ final class DesktopCardView: NSView {
         todayRequestsLabel.stringValue = snapshot.todayRequests.map(String.init) ?? "--"
         lastUpdateLabel.stringValue = Self.updateFormatter.string(from: snapshot.updatedAt)
         applyConnection(connection)
+        layoutSubtreeIfNeeded()
+        fitBalanceText()
+        fitConnectionStatusText()
     }
 
     func damageAnchor() -> CGPoint {
@@ -198,6 +201,47 @@ final class DesktopCardView: NSView {
         connectionStatusLabel.stringValue = description
         connectionIndicator.layer?.backgroundColor = color.cgColor
         connectionIndicator.setAccessibilityValue(description)
+    }
+
+    private func fitBalanceText() {
+        fitSingleLineText(
+            in: balanceLabel,
+            preferredSize: 30,
+            minimumSize: 20,
+            font: { .monospacedDigitSystemFont(ofSize: $0, weight: .semibold) }
+        )
+    }
+
+    private func fitConnectionStatusText() {
+        fitSingleLineText(
+            in: connectionStatusLabel,
+            preferredSize: 12,
+            minimumSize: 9,
+            font: { .systemFont(ofSize: $0, weight: .regular) }
+        )
+    }
+
+    private func fitSingleLineText(
+        in label: NSTextField,
+        preferredSize: CGFloat,
+        minimumSize: CGFloat,
+        font: (CGFloat) -> NSFont
+    ) {
+        let availableWidth = label.bounds.width
+        var fontSize = preferredSize
+        label.font = font(fontSize)
+
+        guard availableWidth > 0 else { return }
+        while renderedWidth(of: label.stringValue, font: label.font) > availableWidth,
+              fontSize > minimumSize {
+            fontSize = max(minimumSize, fontSize - 0.5)
+            label.font = font(fontSize)
+        }
+    }
+
+    private func renderedWidth(of text: String, font: NSFont?) -> CGFloat {
+        guard let font else { return 0 }
+        return (text as NSString).size(withAttributes: [.font: font]).width
     }
 
     private static let updateFormatter: DateFormatter = {
