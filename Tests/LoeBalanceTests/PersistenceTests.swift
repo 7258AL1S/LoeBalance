@@ -51,4 +51,16 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(state.recentUsageIDs.first, 201)
         XCTAssertTrue(state.recentUsageIDs.contains(700))
     }
+
+    func testSnapshotDecodeNormalizesDuplicateAndOversizedUsageIDs() throws {
+        let ids = ([1, 2, 1] + Array(3...501)).map(String.init).joined(separator: ",")
+        let json = Data("{\"cachedSnapshot\":null,\"watermarkTime\":null,\"recentUsageIDs\":[\(ids)]}".utf8)
+
+        let state = try JSONDecoder().decode(PersistedSnapshotState.self, from: json)
+
+        XCTAssertEqual(state.recentUsageIDs.count, 500)
+        XCTAssertEqual(state.recentUsageIDs.first, 2)
+        XCTAssertEqual(state.recentUsageIDs.last, 501)
+        XCTAssertEqual(state.recentUsageIDs, Array(2...501).map(Int64.init))
+    }
 }

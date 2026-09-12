@@ -15,6 +15,21 @@ struct PersistedSnapshotState: Codable, Equatable, Sendable {
         self.recentUsageIDs = Self.boundedUniqueIDs(recentUsageIDs)
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case cachedSnapshot
+        case watermarkTime
+        case recentUsageIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            cachedSnapshot: try container.decodeIfPresent(BalanceSnapshot.self, forKey: .cachedSnapshot),
+            watermarkTime: try container.decodeIfPresent(Date.self, forKey: .watermarkTime),
+            recentUsageIDs: try container.decode([Int64].self, forKey: .recentUsageIDs)
+        )
+    }
+
     mutating func recordUsageIDs(_ ids: [Int64]) {
         var ordered = recentUsageIDs
         for id in ids {
