@@ -171,6 +171,30 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.showsDesktopCard)
     }
 
+    func testCardPositionAndLayerPersistAndNotifyCoordinator() throws {
+        let preferences = SettingsPreferencesStore()
+        var positions: [CardPositionPreset] = []
+        var layers: [CardLayer] = []
+        let viewModel = SettingsViewModel(
+            preferencesStore: preferences,
+            scheduler: SettingsScheduler(),
+            launchAtLogin: SettingsLaunchService(),
+            onCardPositionChanged: { positions.append($0) },
+            onCardLayerChanged: { layers.append($0) },
+            logout: {}
+        )
+
+        viewModel.setCardPosition(.topLeft)
+        viewModel.setCardLayer(.aboveApplications)
+
+        XCTAssertEqual(viewModel.cardPosition, .topLeft)
+        XCTAssertEqual(viewModel.cardLayer, .aboveApplications)
+        XCTAssertEqual(positions, [.topLeft])
+        XCTAssertEqual(layers, [.aboveApplications])
+        XCTAssertEqual(try preferences.load()?.cardPosition, .topLeft)
+        XCTAssertEqual(try preferences.load()?.cardLayer, .aboveApplications)
+    }
+
     func testPreferenceSaveFailureKeepsShakeAndCardStateAndSuppressesCallbacks() {
         let preferences = SettingsPreferencesStore()
         let scheduler = SettingsScheduler()

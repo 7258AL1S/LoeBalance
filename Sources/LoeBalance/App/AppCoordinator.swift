@@ -191,6 +191,8 @@ final class AppCoordinator {
             launchAtLogin: launchAtLogin,
             onShakeStrengthChanged: { value in bridge.coordinator?.preferenceShakeStrengthChanged(value) },
             onShowsDesktopCardChanged: { value in bridge.coordinator?.preferenceDesktopCardChanged(value) },
+            onCardPositionChanged: { value in bridge.coordinator?.preferenceCardPositionChanged(value) },
+            onCardLayerChanged: { value in bridge.coordinator?.preferenceCardLayerChanged(value) },
             logout: { await bridge.coordinator?.logout() }
         )
         let settingsWindow = SettingsWindowController(viewModel: settingsViewModel)
@@ -287,6 +289,14 @@ final class AppCoordinator {
         showsDesktopCard = visible
         desktopCard.setVisible(visible && isAuthenticated)
         statusBar.setDesktopCardVisible(visible)
+    }
+
+    func preferenceCardPositionChanged(_ position: CardPositionPreset) {
+        desktopCard.setCardPosition(position)
+    }
+
+    func preferenceCardLayerChanged(_ layer: CardLayer) {
+        desktopCard.setCardLayer(layer)
     }
 
     func logout() async {

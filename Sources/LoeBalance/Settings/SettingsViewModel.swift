@@ -39,6 +39,8 @@ enum RefreshIntervalPreset: String, CaseIterable, Identifiable, Sendable {
 final class SettingsViewModel: ObservableObject {
     @Published var shakeStrength: ShakeStrength
     @Published var showsDesktopCard: Bool
+    @Published var cardPosition: CardPositionPreset
+    @Published var cardLayer: CardLayer
     @Published var launchAtLogin: Bool
     @Published var refreshPreset: RefreshIntervalPreset
     @Published var customInterval: String
@@ -62,6 +64,8 @@ final class SettingsViewModel: ObservableObject {
     private var persistedRefreshUnit: RefreshIntervalUnit
     private let onShakeStrengthChanged: @MainActor (ShakeStrength) -> Void
     private let onShowsDesktopCardChanged: @MainActor (Bool) -> Void
+    private let onCardPositionChanged: @MainActor (CardPositionPreset) -> Void
+    private let onCardLayerChanged: @MainActor (CardLayer) -> Void
     private let logoutAction: @MainActor () async -> Void
 
     init(
@@ -70,6 +74,8 @@ final class SettingsViewModel: ObservableObject {
         launchAtLogin: any LaunchAtLoginServicing,
         onShakeStrengthChanged: @escaping @MainActor (ShakeStrength) -> Void = { _ in },
         onShowsDesktopCardChanged: @escaping @MainActor (Bool) -> Void = { _ in },
+        onCardPositionChanged: @escaping @MainActor (CardPositionPreset) -> Void = { _ in },
+        onCardLayerChanged: @escaping @MainActor (CardLayer) -> Void = { _ in },
         logout: @escaping @MainActor () async -> Void
     ) {
         self.preferencesStore = preferencesStore
@@ -78,6 +84,8 @@ final class SettingsViewModel: ObservableObject {
         self.preferences = (try? preferencesStore.load()) ?? AppPreferences()
         self.shakeStrength = self.preferences.shakeStrength
         self.showsDesktopCard = self.preferences.showsDesktopCard
+        self.cardPosition = self.preferences.cardPosition
+        self.cardLayer = self.preferences.cardLayer
         self.launchAtLogin = launchAtLogin.isEnabled
         let initialCustomInterval = String(format: "%.0f", self.preferences.refreshInterval)
         let initialRefreshUnit = RefreshIntervalUnit.seconds
@@ -90,6 +98,8 @@ final class SettingsViewModel: ObservableObject {
         self.persistedRefreshUnit = initialRefreshUnit
         self.onShakeStrengthChanged = onShakeStrengthChanged
         self.onShowsDesktopCardChanged = onShowsDesktopCardChanged
+        self.onCardPositionChanged = onCardPositionChanged
+        self.onCardLayerChanged = onCardLayerChanged
         self.logoutAction = logout
     }
 
@@ -181,6 +191,36 @@ final class SettingsViewModel: ObservableObject {
         errorMessage = nil
         onShowsDesktopCardChanged(value)
         return true
+    }
+
+    func setCardPosition(_ value: CardPositionPreset) {
+        var candidate = preferences
+        candidate.cardPosition = value
+        do {
+            try preferencesStore.save(candidate)
+        } catch {
+            errorMessage = "Unable to save settings."
+            return
+        }
+        preferences = candidate
+        cardPosition = value
+        errorMessage = nil
+        onCardPositionChanged(value)
+    }
+
+    func setCardLayer(_ value: CardLayer) {
+        var candidate = preferences
+        candidate.cardLayer = value
+        do {
+            try preferencesStore.save(candidate)
+        } catch {
+            errorMessage = "Unable to save settings."
+            return
+        }
+        preferences = candidate
+        cardLayer = value
+        errorMessage = nil
+        onCardLayerChanged(value)
     }
 
     func setLaunchAtLogin(_ value: Bool) throws {

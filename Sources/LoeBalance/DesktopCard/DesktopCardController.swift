@@ -6,6 +6,8 @@ protocol DesktopCardPresenting: AnyObject {
     func present(snapshot: BalanceSnapshot, connection: ConnectionState)
     func play(events: [BalanceAnimationEvent], shake: ShakeStrength, reduceMotion: Bool)
     func setVisible(_ visible: Bool)
+    func setCardPosition(_ position: CardPositionPreset)
+    func setCardLayer(_ layer: CardLayer)
 }
 
 @MainActor
@@ -30,11 +32,13 @@ final class DesktopCardController: NSObject, DesktopCardPresenting, NSWindowDele
         let preferredFrame = self.preferences.desktopFrame
         let visibleFrame = visibleFrameProvider(preferredFrame ?? .zero)
         let initialFrame: NSRect
-        if let preferredFrame {
+        if self.preferences.cardPosition == .custom, let preferredFrame {
             initialFrame = visibleFrame.map { Self.clampedFrame(preferredFrame, to: $0) }
                 ?? NSRect(origin: preferredFrame.origin, size: Self.panelContentSize)
         } else if let visibleFrame {
-            initialFrame = Self.defaultFrame(in: visibleFrame)
+            initialFrame = Self.frame(for: self.preferences.cardPosition, in: visibleFrame)
+        } else if let preferredFrame {
+            initialFrame = NSRect(origin: preferredFrame.origin, size: Self.panelContentSize)
         } else {
             initialFrame = NSRect(origin: .zero, size: Self.panelContentSize)
         }
@@ -77,10 +81,73 @@ final class DesktopCardController: NSObject, DesktopCardPresenting, NSWindowDele
         }
     }
 
+    func setCardPosition(_ position: CardPositionPreset) {
+        preferences.cardPosition = position
+        if position == .custom {
+            preferences.desktopFrame = panel.frame
+        } else if let visibleFrame = visibleFrameProvider(panel.frame) {
+            let frame = Self.frame(for: position, in: visibleFrame)
+            panel.setFrame(frame, display: true, animate: true)
+            preferences.desktopFrame = frame
+        }
+        panel.isMovableByWindowBackground = position == .custom
+        try? preferencesStore.save(preferences)
+    }
+
+    func setCardLayer(_ layer: CardLayer) {
+        preferences.cardLayer = layer
+        panel.level = Self.windowLevel(for: layer)
+        try? preferencesStore.save(preferences)
+    }
+
     func windowDidMove(_ notification: Notification) {
         guard let movedPanel = notification.object as? NSPanel, movedPanel === panel else { return }
+        guard preferences.cardPosition == .custom else { return }
         preferences.desktopFrame = panel.frame
         try? preferencesStore.save(preferences)
+    }
+
+    func windowDidChangeScreen(_ notification: Notification) {
+        guard preferences.cardPosition != .custom,
+              let visibleFrame = visibleFrameProvider(panel.frame) else { return }
+        panel.setFrame(Self.frame(for: preferences.cardPosition, in: visibleFrame), display: true, animate: false)
+    }
+
+    static func frame(for position: CardPositionPreset, in visibleFrame: CGRect) -> NSRect {
+        let size = Self.panelContentSize
+        let margin: CGFloat = 24
+        let rawFrame: CGRect
+        switch position {
+        case .topLeft:
+            rawFrame = CGRect(
+                x: visibleFrame.minX + margin,
+                y: visibleFrame.maxY - size.height - margin,
+                width: size.width,
+                height: size.height
+            )
+        case .bottomLeft:
+            rawFrame = CGRect(
+                x: visibleFrame.minX + margin,
+                y: visibleFrame.minY + margin,
+                width: size.width,
+                height: size.height
+            )
+        case .topRight:
+            rawFrame = CGRect(
+                x: visibleFrame.maxX - size.width - margin,
+                y: visibleFrame.maxY - size.height - margin,
+                width: size.width,
+                height: size.height
+            )
+        case .bottomRight, .custom:
+            rawFrame = CGRect(
+                x: visibleFrame.maxX - size.width - margin,
+                y: visibleFrame.minY + margin,
+                width: size.width,
+                height: size.height
+            )
+        }
+        return Self.clampedFrame(rawFrame, to: visibleFrame)
     }
 
     static func clampedFrame(_ frame: CGRect, to visibleFrame: CGRect) -> CGRect {
@@ -112,9 +179,9 @@ final class DesktopCardController: NSObject, DesktopCardPresenting, NSWindowDele
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = preferences.cardPosition == .custom
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        panel.level = Self.desktopCardLevel
+        panel.level = Self.windowLevel(for: preferences.cardLayer)
         panel.hasShadow = true
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
@@ -144,20 +211,24 @@ final class DesktopCardController: NSObject, DesktopCardPresenting, NSWindowDele
         layer.add(animation, forKey: "desktop-card.shake")
     }
 
-    private static let desktopCardLevel: NSWindow.Level = {
+    static func windowLevel(for layer: CardLayer) -> NSWindow.Level {
         let desktopLevel = Int(CGWindowLevelForKey(.desktopWindow))
+        let desktopIconLevel = Int(CGWindowLevelForKey(.desktopIconWindow))
         let normalLevel = NSWindow.Level.normal.rawValue
-        return NSWindow.Level(rawValue: min(normalLevel - 1, desktopLevel + 1))
-    }()
-
-    private static func defaultFrame(in visibleFrame: CGRect) -> NSRect {
-        let size = Self.panelContentSize
-        return NSRect(
-            x: max(visibleFrame.minX, visibleFrame.maxX - size.width - 24),
-            y: max(visibleFrame.minY, visibleFrame.maxY - size.height - 24),
-            width: size.width,
-            height: size.height
+        let belowDesktopIcons = min(max(desktopLevel, desktopIconLevel - 1), normalLevel - 2)
+        let betweenDesktopIconsAndApplications = min(
+            max(belowDesktopIcons + 1, desktopIconLevel + 1),
+            normalLevel - 1
         )
+
+        switch layer {
+        case .belowDesktopIcons:
+            return NSWindow.Level(rawValue: belowDesktopIcons)
+        case .betweenDesktopIconsAndApplications:
+            return NSWindow.Level(rawValue: betweenDesktopIconsAndApplications)
+        case .aboveApplications:
+            return .floating
+        }
     }
 
     private static func visibleFrame(for preferredFrame: CGRect) -> CGRect? {

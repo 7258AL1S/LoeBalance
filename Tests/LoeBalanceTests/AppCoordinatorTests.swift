@@ -84,6 +84,17 @@ final class AppCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.showsDesktopCard, false)
     }
 
+    func testCardPositionAndLayerPreferencesPropagateToDesktopCard() {
+        let card = CoordinatorCardSpy()
+        let coordinator = makeCoordinator(card: card)
+
+        coordinator.preferenceCardPositionChanged(.topLeft)
+        coordinator.preferenceCardLayerChanged(.aboveApplications)
+
+        XCTAssertEqual(card.positions, [.topLeft])
+        XCTAssertEqual(card.layers, [.aboveApplications])
+    }
+
     func testNetworkUnavailablePausesSchedulerAndPresentsOfflineSnapshot() async {
         let scheduler = CoordinatorTestScheduler()
         let card = CoordinatorCardSpy()
@@ -261,10 +272,14 @@ private final class CoordinatorCardSpy: DesktopCardPresenting {
     var presentedSnapshots: [BalanceSnapshot] = []
     var presentedConnections: [ConnectionState] = []
     var visibility: [Bool] = []
+    var positions: [CardPositionPreset] = []
+    var layers: [CardLayer] = []
 
     func present(snapshot: BalanceSnapshot, connection: ConnectionState) { calls.append(.present); presentedSnapshots.append(snapshot); presentedConnections.append(connection); order.append(.cardPresent) }
     func play(events: [BalanceAnimationEvent], shake: ShakeStrength, reduceMotion: Bool) { calls.append(.play); order.append(.cardPlay) }
     func setVisible(_ visible: Bool) { visibility.append(visible) }
+    func setCardPosition(_ position: CardPositionPreset) { positions.append(position) }
+    func setCardLayer(_ layer: CardLayer) { layers.append(layer) }
 }
 
 @MainActor

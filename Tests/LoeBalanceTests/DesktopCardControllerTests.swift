@@ -76,6 +76,51 @@ final class DesktopCardControllerTests: XCTestCase {
         XCTAssertEqual(saved, movedFrame)
     }
 
+    func testPresetFramesUseVisibleWorkAreaCorners() {
+        let visibleFrame = CGRect(x: 100, y: 80, width: 1_000, height: 700)
+
+        XCTAssertEqual(
+            DesktopCardController.frame(for: .topLeft, in: visibleFrame),
+            CGRect(x: 124, y: 538, width: 326, height: 218)
+        )
+        XCTAssertEqual(
+            DesktopCardController.frame(for: .bottomLeft, in: visibleFrame),
+            CGRect(x: 124, y: 104, width: 326, height: 218)
+        )
+        XCTAssertEqual(
+            DesktopCardController.frame(for: .topRight, in: visibleFrame),
+            CGRect(x: 750, y: 538, width: 326, height: 218)
+        )
+        XCTAssertEqual(
+            DesktopCardController.frame(for: .bottomRight, in: visibleFrame),
+            CGRect(x: 750, y: 104, width: 326, height: 218)
+        )
+    }
+
+    func testPresetPositionDisablesDraggingAndCustomPositionEnablesIt() {
+        let store = DesktopCardPreferencesStore(preferences: AppPreferences(cardPosition: .topLeft))
+        let controller = DesktopCardController(
+            preferencesStore: store,
+            visibleFrameProvider: { _ in CGRect(x: 0, y: 0, width: 1_000, height: 700) }
+        )
+
+        XCTAssertFalse(controller.panel.isMovableByWindowBackground)
+
+        controller.setCardPosition(.custom)
+
+        XCTAssertTrue(controller.panel.isMovableByWindowBackground)
+        XCTAssertEqual(store.savedPreferences?.cardPosition, .custom)
+    }
+
+    func testLayerMappingProvidesThreeDistinctLevels() {
+        let levels = CardLayer.allCases.map(DesktopCardController.windowLevel(for:))
+
+        XCTAssertEqual(levels.count, 3)
+        XCTAssertEqual(Set(levels.map(\.rawValue)).count, 3)
+        XCTAssertLessThan(levels[0].rawValue, levels[1].rawValue)
+        XCTAssertLessThan(levels[1].rawValue, levels[2].rawValue)
+    }
+
     func testClampingPreservesTopEdgeInsideUndersizedVisibleFrame() {
         let visibleFrame = CGRect(x: 50, y: 60, width: 200, height: 100)
 

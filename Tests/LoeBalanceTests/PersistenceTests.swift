@@ -33,6 +33,30 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(try store.load(), expected)
     }
 
+    func testCardPositionAndLayerRoundTrip() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "LoeBalance.PersistenceTests.cardOptions"))
+        defaults.removePersistentDomain(forName: "LoeBalance.PersistenceTests.cardOptions")
+        let store = UserDefaultsPreferencesStore(userDefaults: defaults)
+        let expected = AppPreferences(
+            shakeStrength: .strong,
+            cardPosition: .custom,
+            cardLayer: .aboveApplications
+        )
+
+        try store.save(expected)
+
+        XCTAssertEqual(try store.load(), expected)
+    }
+
+    func testLegacyPreferencesWithFrameMigrateToCustomPosition() throws {
+        let data = Data(#"{"refreshInterval":30,"shakeStrength":"weak","showsDesktopCard":true,"launchAtLogin":false,"desktopFrame":{"x":10,"y":20,"width":326,"height":218}}"#.utf8)
+
+        let preferences = try JSONDecoder().decode(AppPreferences.self, from: data)
+
+        XCTAssertEqual(preferences.cardPosition, .custom)
+        XCTAssertEqual(preferences.cardLayer, .betweenDesktopIconsAndApplications)
+    }
+
     func testSnapshotRoundTripAndUsageOrdering() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "LoeBalance.PersistenceTests.snapshot"))
         defaults.removePersistentDomain(forName: "LoeBalance.PersistenceTests.snapshot")

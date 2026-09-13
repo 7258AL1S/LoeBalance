@@ -12,7 +12,7 @@ final class SettingsWindowController: NSWindowController {
         window.title = "Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 390, height: 300))
+        window.setContentSize(NSSize(width: 390, height: 430))
         super.init(window: window)
     }
 
