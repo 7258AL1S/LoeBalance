@@ -32,4 +32,4 @@
 - [x] Update 0.3.0 release notes and release workflow.
 - [x] Build macOS arm64 and x86_64 packages.
 - [x] Verify the Windows v0.2.0 installers and checksums for reuse.
-- [ ] Publish v0.3.0 and verify its eight assets.
+- [x] Publish v0.3.0 and verify its eight assets.
